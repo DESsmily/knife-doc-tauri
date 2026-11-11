@@ -1,0 +1,281 @@
+// ---------------------------------------------------------------------------
+// 全局样式与主题令牌
+// 注：Element Plus 的基础样式与暗色变量在 main.ts 中先于本文件引入，
+//     因此这里对 :root / html.dark 的覆盖可以生效。
+// ---------------------------------------------------------------------------
+
+:root {
+  --kd-bg: #f4f6fa;
+  --kd-bg-sub: #eef1f7;
+  --kd-panel: #ffffff;
+  --kd-panel-2: #f8fafc;
+  --kd-panel-3: #f1f4f9;
+  --kd-border: #e3e8f0;
+  --kd-border-strong: #d3dae6;
+  --kd-text: #1c2333;
+  --kd-text-2: #4a5366;
+  --kd-text-3: #8b95a7;
+  --kd-primary: #4f7cff;
+  --kd-primary-soft: rgba(79, 124, 255, 0.1);
+  --kd-primary-hover: #6b90ff;
+  --kd-success: #00b578;
+  --kd-success-soft: rgba(0, 181, 120, 0.12);
+  --kd-warning: #ff8f1f;
+  --kd-danger: #f5222d;
+  --kd-danger-soft: rgba(245, 34, 45, 0.1);
+  --kd-code-bg: #f7f9fc;
+  --kd-scrollbar: #ccd4e0;
+  --kd-scrollbar-hover: #a9b4c6;
+  --kd-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --kd-shadow-md: 0 6px 18px rgba(16, 24, 40, 0.08);
+  --kd-shadow-lg: 0 16px 40px rgba(16, 24, 40, 0.12);
+  --kd-mask: rgba(16, 24, 40, 0.45);
+}
+
+html.dark {
+  --kd-bg: #14171d;
+  --kd-bg-sub: #191d25;
+  --kd-panel: #1c212a;
+  --kd-panel-2: #212733;
+  --kd-panel-3: #262d3a;
+  --kd-border: #2c3441;
+  --kd-border-strong: #3a4353;
+  --kd-text: #e6eaf2;
+  --kd-text-2: #a9b3c4;
+  --kd-text-3: #6f7a8c;
+  --kd-primary: #5b86ff;
+  --kd-primary-soft: rgba(91, 134, 255, 0.16);
+  --kd-primary-hover: #7a9dff;
+  --kd-success: #23c98b;
+  --kd-success-soft: rgba(35, 201, 139, 0.16);
+  --kd-warning: #ffa940;
+  --kd-danger: #ff5c5c;
+  --kd-danger-soft: rgba(255, 92, 92, 0.16);
+  --kd-code-bg: #171b22;
+  --kd-scrollbar: #39424f;
+  --kd-scrollbar-hover: #4b5563;
+  --kd-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --kd-shadow-md: 0 6px 18px rgba(0, 0, 0, 0.4);
+  --kd-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --kd-mask: rgba(0, 0, 0, 0.6);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--kd-bg);
+  color: var(--kd-text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: $font-md;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-weight: 600;
+  color: var(--kd-text);
+}
+
+a {
+  color: var(--kd-primary);
+  text-decoration: none;
+}
+
+p {
+  margin: 0;
+}
+
+code,
+pre,
+kbd {
+  font-family: $font-mono;
+}
+
+// 通用工具类
+.kd-scroll {
+  @include scrollbar;
+  overflow: auto;
+}
+
+.kd-ellipsis {
+  @include ellipsis(1);
+}
+
+.kd-mono {
+  font-family: $font-mono;
+}
+
+.kd-text-2 {
+  color: var(--kd-text-2);
+}
+
+.kd-text-3 {
+  color: var(--kd-text-3);
+}
+
+.kd-panel {
+  @include card;
+}
+
+.kd-divider {
+  height: 1px;
+  background: var(--kd-border);
+  border: 0;
+  margin: 16px 0;
+}
+
+// ---- Element Plus 主题对齐 ----------------------------------------------
+:root {
+  --el-color-primary: var(--kd-primary);
+  --el-border-radius-base: 6px;
+  --el-font-size-base: 13px;
+}
+
+html.dark {
+  --el-bg-color: var(--kd-panel);
+  --el-bg-color-page: var(--kd-bg);
+  --el-bg-color-overlay: var(--kd-panel-2);
+  --el-text-color-primary: var(--kd-text);
+  --el-text-color-regular: var(--kd-text-2);
+  --el-text-color-secondary: var(--kd-text-3);
+  --el-text-color-placeholder: var(--kd-text-3);
+  --el-border-color: var(--kd-border);
+  --el-border-color-light: var(--kd-border);
+  --el-border-color-lighter: var(--kd-border);
+  --el-fill-color-blank: var(--kd-panel);
+  --el-fill-color-light: var(--kd-panel-2);
+  --el-fill-color-lighter: var(--kd-panel-2);
+  --el-mask-color: var(--kd-mask);
+}
+
+// 表格在文档场景下的紧凑化调整
+.el-table {
+  --el-table-border-color: var(--kd-border);
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: var(--kd-panel-2);
+  --el-table-row-hover-bg-color: var(--kd-primary-soft);
+  font-size: $font-sm;
+}
+
+.el-table th.el-table__cell {
+  font-weight: 600;
+  color: var(--kd-text-2);
+}
+
+.el-table .cell {
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.el-dialog {
+  border-radius: $radius-lg;
+  overflow: hidden;
+}
+
+.el-dialog__body {
+  padding-top: 12px;
+}
+
+.el-message-box {
+  max-width: 460px;
+}
+
+// 代码块通用样式
+.kd-code {
+  background: var(--kd-code-bg);
+  border: 1px solid var(--kd-border);
+  border-radius: $radius-md;
+  font-family: $font-mono;
+  font-size: $font-sm;
+  line-height: 1.7;
+  padding: 14px 16px;
+  margin: 0;
+  white-space: pre;
+  overflow: auto;
+  color: var(--kd-text);
+  tab-size: 2;
+  @include scrollbar;
+}
+
+// 语法高亮色板（作用于 v-html 生成的内容，需为全局样式）
+.kd-code {
+  .tk-key {
+    color: #7b57d6;
+  }
+  .tk-str {
+    color: #0f8f5f;
+  }
+  .tk-num {
+    color: #c2410c;
+  }
+  .tk-bool {
+    color: #b45309;
+  }
+  .tk-punc {
+    color: var(--kd-text-3);
+  }
+  .tk-com {
+    color: var(--kd-text-3);
+    font-style: italic;
+  }
+  .tk-tpl {
+    color: #0f8f5f;
+  }
+  .tk-kw {
+    color: #2563eb;
+  }
+  .tk-type {
+    color: #b91c6b;
+  }
+}
+
+html.dark .kd-code {
+  .tk-key {
+    color: #c792ea;
+  }
+  .tk-str {
+    color: #7ee787;
+  }
+  .tk-num {
+    color: #ffab70;
+  }
+  .tk-bool {
+    color: #ffab70;
+  }
+  .tk-punc {
+    color: #8b949e;
+  }
+  .tk-com {
+    color: #6b7280;
+  }
+  .tk-tpl {
+    color: #7ee787;
+  }
+  .tk-kw {
+    color: #79c0ff;
+  }
+  .tk-type {
+    color: #ff7b72;
+  }
+}
+

@@ -1,0 +1,40 @@
+{
+  "name": "knife-doc",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Knife4j 风格的 Swagger / OpenAPI 接口文档展示、在线调试与快捷请求桌面客户端（Tauri 2）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "build:only": "vite build",
+    "typecheck": "vue-tsc -b --force",
+    "preview": "vite preview",
+    "mock": "node mock/server.mjs",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "icon": "tauri icon build/app-icon.png"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.4",
+    "axios": "^1.7.9",
+    "element-plus": "^2.9.1",
+    "pinia": "^3.0.0",
+    "tauri-plugin-better-cors-fetch": "1.8.0",
+    "vue": "^3.5.42",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4",
+    "@types/node": "^24.13.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/tsconfig": "^0.9.1",
+    "sass": "^1.83.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vue-tsc": "3.3.11"
+  }
+}
