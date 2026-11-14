@@ -89,4 +89,39 @@ async function bootstrap() {
   useQuickRequestStore().init()
 }
 
-void bootstrap().finally(() => app.mount('#app'))
+declare global {
+  interface Window {
+    /** index.html 内联脚本写入：启动页开始展示的时间点（performance.now()） */
+    __kdSplashAt?: number
+  }
+}
+
+/**
+ * 启动页最短展示时长（ms）。
+ * 需保证 index.html 里启动页的 CSS3 动画（进入 0.45s + 进度条 0.85s）完整播完；
+ * 加上 0.4s 的淡出，整体「启动页 → 主页」过渡约 1.4s，控制在 1.5s 以内。
+ */
+const SPLASH_MIN_DURATION = 1000
+
+/** 启动页开始展示的时间点（优先取 head 内联脚本记录的值，越早越准） */
+const SPLASH_STARTED_AT = window.__kdSplashAt ?? performance.now()
+
+void bootstrap().finally(() => {
+  app.mount('#app')
+
+  let revealed = false
+  const reveal = () => {
+    if (revealed) return
+    revealed = true
+    // 切到 kd-ready：启动页淡出、应用主体淡入（与 index.html 内联样式对应）
+    document.documentElement.classList.add('kd-ready')
+  }
+
+  // 若数据加载很快，则补足到最短展示时长再进场；若加载较慢，则立即进场
+  const elapsed = performance.now() - SPLASH_STARTED_AT
+  const wait = Math.max(0, SPLASH_MIN_DURATION - elapsed)
+
+  window.setTimeout(reveal, wait)
+  // 兜底：窗口被遮挡 / 最小化启动导致定时器被节流时，也确保最终能进入主页
+  window.setTimeout(reveal, wait + 600)
+})

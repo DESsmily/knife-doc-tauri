@@ -23,6 +23,12 @@ export interface UpdateInfo {
   body: string
 }
 
+/** 下载进度：downloaded 为已下载字节数，total 为总字节数（服务端未返回时为 null） */
+export interface DownloadProgress {
+  downloaded: number
+  total: number | null
+}
+
 /** 检查是否有可用更新；无更新或非桌面端时返回 null */
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
   if (!isTauri) return null
@@ -41,20 +47,34 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
   }
 }
 
-/** 下载并安装更新；onProgress 回调收到已下载字节数 */
+/**
+ * 下载并安装更新。onProgress 会收到累计已下载字节数与总字节数（总量未知时为 null），
+ * 便于界面展示真实进度百分比。
+ */
 export async function downloadAndInstallUpdate(
   rid: number,
-  onProgress?: (downloaded: number) => void
+  onProgress?: (progress: DownloadProgress) => void
 ): Promise<void> {
   if (!isTauri) return
-  const channel = new Channel()
+
+  const channel = new Channel<{ event: string; data: { chunkLength?: number; contentLength?: number } }>()
+  let downloaded = 0
+  let total: number | null = null
+
   if (onProgress) {
-    channel.onmessage = (event: unknown) => {
-      const data = event as { event: string; data: { chunkLength: number } }
-      if (data?.event === 'Progress') {
-        onProgress(data.data.chunkLength)
+    channel.onmessage = (event) => {
+      const name = event?.event
+      if (name === 'Started') {
+        // Started 事件带出更新包总大小，用于计算百分比
+        total = typeof event.data?.contentLength === 'number' ? event.data.contentLength : null
+        onProgress({ downloaded, total })
+      } else if (name === 'Progress') {
+        // Progress 每次只带本块长度，需要在此累计
+        downloaded += event.data?.chunkLength ?? 0
+        onProgress({ downloaded, total })
       }
     }
   }
+
   await invoke('plugin:updater|download_and_install', { onEvent: channel, rid })
 }

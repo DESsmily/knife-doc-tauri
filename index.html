@@ -6,9 +6,257 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Knife4j 风格的 Swagger / OpenAPI 接口文档展示、调试与快捷请求桌面客户端" />
     <title>Knife Doc · 接口文档</title>
+    <script>
+      // 尽早记录启动页开始展示的时间点，供 main.ts 计算「启动页 → 主页」的切换时机。
+      // 该脚本在 head 解析时同步执行，比模块脚本更贴近首帧绘制时间。
+      window.__kdSplashAt = performance.now()
+    </script>
+    <!--
+      启动期关键样式（内联，先于打包产物生效）：
+
+      1. 桌面端窗口是「透明窗口」（tauri.conf.json 中 transparent: true），WebView 未绘制内容时
+         窗口是透明的，因此不会再出现启动瞬间的白底闪烁。根节点默认保持透明。
+      2. 提供一个半透明毛玻璃启动页（#kd-splash）：展示应用图标、应用名与「开始使用」文案。
+         全部动效为纯 CSS3，约 1.4s 内完成（进入约 0.45s + 进度条 0.85s + 淡出 0.4s ≤ 1.5s）。
+      3. 应用挂载完成并在启动页展示满最短时长后，由 main.ts 给 <html> 加上 kd-ready：
+         启动页淡出、应用主体淡入，实现「启动页 → 主页」的平滑切换。
+    -->
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background: transparent;
+      }
+
+      /* 应用主体：首帧完全透明，待 kd-ready 后淡入，与启动页淡出交叉过渡 */
+      #app {
+        height: 100%;
+        opacity: 0;
+        transform: scale(0.985);
+        transform-origin: 50% 50%;
+        transition:
+          opacity 0.5s cubic-bezier(0.22, 0.61, 0.36, 1),
+          transform 0.5s cubic-bezier(0.22, 0.61, 0.36, 1);
+      }
+
+      /* 启动页未结束时应用主体不响应鼠标，避免点到尚未出现的界面 */
+      html:not(.kd-ready) #app {
+        pointer-events: none;
+      }
+
+      html.kd-ready #app {
+        opacity: 1;
+        transform: none;
+      }
+
+      /* ----------------------------- 启动页 ----------------------------- */
+      .kd-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        /* 半透明毛玻璃底：窗口本身透明，这里让桌面微微透出 */
+        background:
+          radial-gradient(120% 100% at 50% 0%, rgba(79, 124, 255, 0.24), rgba(79, 124, 255, 0) 62%),
+          rgba(16, 19, 27, 0.76);
+        opacity: 1;
+        transition: opacity 0.4s ease, visibility 0s linear 0.4s;
+      }
+
+      /* 进入主页：启动页整体淡出，随后彻底移出交互与无障碍树 */
+      html.kd-ready .kd-splash {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .kd-splash__card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 13px;
+        animation: kd-splash-in 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+      }
+
+      .kd-splash__logo-wrap {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 96px;
+        height: 96px;
+        margin-bottom: 4px;
+      }
+
+      /* 图标背后的呼吸光晕 */
+      .kd-splash__glow {
+        position: absolute;
+        inset: -14px;
+        border-radius: 36px;
+        background: radial-gradient(circle, rgba(79, 124, 255, 0.6), rgba(79, 124, 255, 0) 70%);
+        animation: kd-splash-glow 1.2s ease-in-out infinite;
+      }
+
+      .kd-splash__logo {
+        position: relative;
+        width: 96px;
+        height: 96px;
+        border-radius: 22px;
+        filter: drop-shadow(0 12px 26px rgba(28, 54, 156, 0.5));
+      }
+
+      .kd-splash__name {
+        font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+        font-size: 19px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        color: #ffffff;
+        animation: kd-splash-up 0.4s ease 0.12s both;
+      }
+
+      .kd-splash__tagline {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 4px 14px;
+        font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+        font-size: 13px;
+        letter-spacing: 0.5px;
+        color: rgba(255, 255, 255, 0.88);
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        animation: kd-splash-up 0.4s ease 0.2s both;
+      }
+
+      .kd-splash__tagline::after {
+        content: '';
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #6b90ff;
+        animation: kd-splash-blink 0.9s ease-in-out infinite;
+      }
+
+      .kd-splash__bar {
+        width: 132px;
+        height: 3px;
+        margin-top: 5px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.16);
+        overflow: hidden;
+        animation: kd-splash-up 0.4s ease 0.26s both;
+      }
+
+      .kd-splash__bar span {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #4f7cff, #8a5cf6);
+        transform: scaleX(0);
+        transform-origin: left center;
+        animation: kd-splash-bar 0.85s cubic-bezier(0.4, 0, 0.2, 1) 0.12s both;
+      }
+
+      /* 卡片整体浮入 */
+      @keyframes kd-splash-in {
+        from {
+          opacity: 0;
+          transform: translateY(10px) scale(0.94);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      /* 文案错峰上浮 */
+      @keyframes kd-splash-up {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      /* 图标光晕呼吸 */
+      @keyframes kd-splash-glow {
+        0%,
+        100% {
+          opacity: 0.5;
+          transform: scale(0.92);
+        }
+        50% {
+          opacity: 0.95;
+          transform: scale(1.08);
+        }
+      }
+
+      /* 文案尾部小圆点闪烁 */
+      @keyframes kd-splash-blink {
+        0%,
+        100% {
+          opacity: 0.35;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      /* 进度条填充 */
+      @keyframes kd-splash-bar {
+        from {
+          transform: scaleX(0);
+        }
+        to {
+          transform: scaleX(1);
+        }
+      }
+
+      /* 尊重系统「减少动态效果」偏好：跳过所有动效，直接显示 */
+      @media (prefers-reduced-motion: reduce) {
+        #app {
+          opacity: 1;
+          transform: none;
+          transition: none;
+        }
+
+        .kd-splash,
+        .kd-splash__card,
+        .kd-splash__glow,
+        .kd-splash__name,
+        .kd-splash__tagline,
+        .kd-splash__tagline::after,
+        .kd-splash__bar,
+        .kd-splash__bar span {
+          animation: none !important;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
+
+    <!-- 启动页：展示应用图标与「开始使用」文案，动画结束后淡出进入主页 -->
+    <div id="kd-splash" class="kd-splash" aria-hidden="true">
+      <div class="kd-splash__card">
+        <div class="kd-splash__logo-wrap">
+          <span class="kd-splash__glow"></span>
+          <img class="kd-splash__logo" src="/app-icon.png" alt="" />
+        </div>
+        <div class="kd-splash__name">Knife Doc Tool</div>
+        <div class="kd-splash__tagline">开始使用</div>
+        <div class="kd-splash__bar"><span></span></div>
+      </div>
+    </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

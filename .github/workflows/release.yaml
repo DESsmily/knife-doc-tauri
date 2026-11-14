@@ -43,6 +43,7 @@ jobs:
         with:
           releaseName: "Release ${{ github.ref_name }}"
           tagName: ${{ github.ref_name }}
+          body_path: ${{ runner.temp }}/changelog.md   # 关键：直接指向抽取出的文件路径
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

@@ -1,7 +1,7 @@
 {
   "name": "knife-doc",
   "private": true,
-  "version": "0.0.3",
+  "version": "0.0.4",
   "type": "module",
   "description": "Knife4j 风格的 Swagger / OpenAPI 接口文档展示、在线调试与快捷请求桌面客户端（Tauri 2）",
   "scripts": {

@@ -72,8 +72,13 @@ body,
   padding: 0;
 }
 
+/*
+ * 页面底色不画在 body 上：桌面端是透明窗口，body 必须保持透明，
+ * 启动时才不会出现「先铺一层底色再淡入」的突变（详见 index.html 内联样式）。
+ * 真正的应用底色画在 App.vue 的 .app-shell 上。
+ */
 body {
-  background: var(--kd-bg);
+  background: transparent;
   color: var(--kd-text);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI',
     Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -81,7 +86,7 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: color 0.2s ease;
 }
 
 h1,
