@@ -3,9 +3,10 @@
 // WindowBar 为全局窗口工具栏，固定在所有页面顶部，提供应用标识与窗口栏。
 import { onBeforeUnmount, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { message } from '@/core/message'
 
 import WindowBar from '@/components/common/WindowBar.vue'
+import PageSearchBox from '@/components/common/PageSearchBox.vue'
 import { onAppEvent, isTauri } from '@/core/tauri'
 import { checkForUpdate, downloadAndInstallUpdate } from '@/core/updater'
 
@@ -36,11 +37,11 @@ async function autoCheckUpdate() {
   try {
     const info = await checkForUpdate()
     if (!info) return
-    ElMessage.info(`发现新版本 ${info.version}，正在自动下载更新…`)
+    message.info(`发现新版本 ${info.version}，正在自动下载更新…`)
     await downloadAndInstallUpdate(info.rid, () => {
       /* 进度静默更新，下载完成后统一提示 */
     })
-    ElMessage.success('更新已下载并安装，请重启应用以使用新版本')
+    message.success('更新已下载并安装，请重启应用以使用新版本')
   } catch {
     /* 网络异常时静默失败，用户可手动在设置页检查 */
   }
@@ -50,11 +51,15 @@ async function autoCheckUpdate() {
 <template>
   <div class="app-shell">
     <WindowBar />
-    <router-view v-slot="{ Component }">
-      <transition name="kd-fade" mode="out-in">
-        <component :is="Component" />
-      </transition>
-    </router-view>
+    <PageSearchBox />
+    <!-- 内容容器撑满剩余高度并允许局部滚动，避免页面级溢出 -->
+    <div class="app-shell__content">
+      <router-view v-slot="{ Component }">
+        <transition name="kd-fade" mode="out-in">
+          <component :is="Component" class="app-shell__page" />
+        </transition>
+      </router-view>
+    </div>
   </div>
 </template>
 
@@ -63,6 +68,19 @@ async function autoCheckUpdate() {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+/* 内容区：撑满窗口栏下方剩余空间，子页面在其内部局部滚动而非整页溢出 */
+.app-shell__content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-shell__page {
+  flex: 1;
+  min-height: 0;
 }
 
 .kd-fade-enter-active,

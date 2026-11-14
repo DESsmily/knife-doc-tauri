@@ -7,7 +7,7 @@
  */
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { message } from '@/core/message'
 
 import KvTable from '@/components/quick/KvTable.vue'
 import ResponsePanel from '@/components/quick/ResponsePanel.vue'
@@ -100,7 +100,7 @@ async function handleSave() {
   store.clearDirty(request.id)
   store.persist()
   const ok = await flushStorage()
-  ElMessage[ok ? 'success' : 'warning'](ok ? '已保存' : '保存失败，请检查安装目录是否可写')
+  message[ok ? 'success' : 'warning'](ok ? '已保存' : '保存失败，请检查安装目录是否可写')
 }
 
 /* ------------------------------------------------------------------ */
@@ -130,7 +130,7 @@ function formatBody() {
   if (!body) return
   const parsed = safeParse(body.text)
   if (parsed === null) {
-    ElMessage.warning('内容不是合法 JSON，无法格式化')
+    message.warning('内容不是合法 JSON，无法格式化')
     return
   }
   body.text = JSON.stringify(parsed, null, 2)
@@ -159,7 +159,7 @@ async function handleSend() {
 
   const check = validateQuickRequest(request)
   if (!check.ok) {
-    ElMessage.warning(check.message)
+    message.warning(check.message)
     return
   }
 
@@ -172,7 +172,7 @@ async function handleSend() {
     sent.value = payload
     const result = await sendDebugRequest(payload)
     response.value = result
-    if (result.error) ElMessage.error(result.error)
+    if (result.error) message.error(result.error)
     // 只记时间戳，落盘仍然交给「保存」
     request.lastSentAt = Date.now()
   } finally {
@@ -183,7 +183,7 @@ async function handleSend() {
 async function copyUrl() {
   if (!props.request) return
   const ok = await copyText(props.request.url)
-  ElMessage[ok ? 'success' : 'warning'](ok ? '地址已复制' : '复制失败')
+  message[ok ? 'success' : 'warning'](ok ? '地址已复制' : '复制失败')
 }
 
 /** 保存响应：桌面端走原生另存为对话框 */
@@ -191,7 +191,7 @@ async function saveResponse(content: string) {
   const ext = response.value && safeParse(response.value.body) !== null ? 'json' : 'txt'
   const name = `${(props.request?.name ?? 'response').replace(/[\\/:*?"<>|]/g, '_')}.${ext}`
   const path = await saveTextFile(name, content)
-  if (path) ElMessage.success(`已保存到 ${path}`)
+  if (path) message.success(`已保存到 ${path}`)
 }
 
 function onKeydown(event: KeyboardEvent) {

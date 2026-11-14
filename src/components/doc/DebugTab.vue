@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, shallowReactive, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { message } from '@/core/message'
 
 import CodeBlock from '@/components/common/CodeBlock.vue'
 import TypeBadge from '@/components/common/TypeBadge.vue'
@@ -493,7 +493,7 @@ function resolveBodyPayload(): { data: unknown; files: { name: string; file: Fil
 
 async function handleSend() {
   if (missingRequired.value.length > 0) {
-    ElMessage.warning(`请先填写必填参数：${missingRequired.value.join('、')}`)
+    message.warning(`请先填写必填参数：${missingRequired.value.join('、')}`)
     return
   }
 
@@ -535,18 +535,18 @@ function handleReset() {
   applyState(buildState(props.detail, props.globalParams))
   for (const key of Object.keys(fileMap)) delete fileMap[key]
   response.value = null
-  ElMessage.success('已重置为文档默认值')
+  message.success('已重置为文档默认值')
 }
 
 async function handleCopyResponse() {
   const ok = await copyText(response.value?.body ?? '')
-  ElMessage[ok ? 'success' : 'warning'](ok ? '响应内容已复制' : '复制失败')
+  message[ok ? 'success' : 'warning'](ok ? '响应内容已复制' : '复制失败')
 }
 
 function handleDownload() {
   const ext = isJsonResponse.value ? 'json' : 'txt'
   void saveTextFile(`${props.detail.operationId || 'response'}.${ext}`, response.value?.body ?? '').then((path) => {
-    if (path) ElMessage.success(`已保存到 ${path}`)
+    if (path) message.success(`已保存到 ${path}`)
   })
 }
 
@@ -607,17 +607,17 @@ function snapshotQuickRequest(): Partial<QuickRequest> {
 
 function handleSaveAsQuick() {
   const request = quickStore.addRequest(snapshotQuickRequest())
-  ElMessage.success(`已存为快捷请求「${request.name}」，可在「快捷请求」页继续编辑`)
+  message.success(`已存为快捷请求「${request.name}」，可在「快捷请求」页继续编辑`)
 }
 
 async function handleCopyUrl() {
   const ok = await copyText(fullUrl.value)
-  ElMessage[ok ? 'success' : 'warning'](ok ? '地址已复制' : '复制失败')
+  message[ok ? 'success' : 'warning'](ok ? '地址已复制' : '复制失败')
 }
 
 async function handleCopyBody() {
   const ok = await copyText(state.rawBody)
-  ElMessage[ok ? 'success' : 'warning'](ok ? '请求体已复制' : '复制失败')
+  message[ok ? 'success' : 'warning'](ok ? '请求体已复制' : '复制失败')
 }
 
 /* ------------------------------------------------------------------ */
@@ -642,7 +642,7 @@ function syncGlobal(row: EditableRow) {
 function formatJson() {
   const parsed = safeParse(state.rawBody)
   if (parsed === null) {
-    ElMessage.warning('当前内容不是合法 JSON，无法格式化')
+    message.warning('当前内容不是合法 JSON，无法格式化')
     return
   }
   state.rawBody = prettyJson(parsed)
@@ -766,7 +766,7 @@ function findNode(nodes: TreeNode[], path: string): TreeNode | null {
 
 watch(jsonPath, (path) => {
   const node = findNode(jsonTree.value, path)
-  if (node) ElMessage.info(node.value.length > 60 ? `${node.value.slice(0, 60)}…` : node.value)
+  if (node) message.info(node.value.length > 60 ? `${node.value.slice(0, 60)}…` : node.value)
 })
 </script>
 

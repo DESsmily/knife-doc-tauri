@@ -5,7 +5,8 @@
 
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { message } from '@/core/message'
 
 import { formatBytes } from '@/core/utils'
 import { useAppStore } from '@/stores/app'
@@ -31,7 +32,7 @@ const downloadProgress = ref(0)
 
 async function handleCheckUpdate() {
   if (!isTauri) {
-    ElMessage.info('自动更新仅在桌面客户端可用')
+    message.info('自动更新仅在桌面客户端可用')
     return
   }
   updateState.value = 'checking'
@@ -41,14 +42,14 @@ async function handleCheckUpdate() {
     if (info) {
       updateInfo.value = info
       updateState.value = 'available'
-      ElMessage.success(`发现新版本 ${info.version}`)
+      message.success(`发现新版本 ${info.version}`)
     } else {
       updateState.value = 'idle'
-      ElMessage.success('当前已是最新版本')
+      message.success('当前已是最新版本')
     }
   } catch {
     updateState.value = 'idle'
-    ElMessage.error('检查更新失败，请检查网络连接')
+    message.error('检查更新失败，请检查网络连接')
   }
 }
 
@@ -61,10 +62,10 @@ async function handleInstallUpdate() {
       downloadProgress.value += chunk
     })
     updateState.value = 'installed'
-    ElMessage.success('更新已下载并安装，请重启应用以生效')
+    message.success('更新已下载并安装，请重启应用以生效')
   } catch {
     updateState.value = 'available'
-    ElMessage.error('下载更新失败，请稍后重试')
+    message.error('下载更新失败，请稍后重试')
   }
 }
 
@@ -112,9 +113,9 @@ const dataFiles = computed(() => {
   ]
 })
 
-async function update(patch: Parameters<typeof appStore.saveSettings>[0], message = '设置已保存') {
+async function update(patch: Parameters<typeof appStore.saveSettings>[0], tip = '设置已保存') {
   const ok = await appStore.saveSettings(patch)
-  ElMessage[ok ? 'success' : 'error'](ok ? message : appStore.error || '保存失败')
+  message[ok ? 'success' : 'error'](ok ? tip : appStore.error || '保存失败')
 }
 
 async function changeTheme(value: ThemeModeSetting) {
@@ -126,7 +127,7 @@ async function openDir(target: DirTarget) {
   try {
     await appStore.openDir(target)
   } catch (error) {
-    ElMessage.error(`打开目录失败：${String(error)}`)
+    message.error(`打开目录失败：${String(error)}`)
   }
 }
 
@@ -144,9 +145,9 @@ async function clear(target: 'cache' | 'temp') {
   busy.value = target
   try {
     const freed = await appStore.clearDir(target)
-    ElMessage.success(`已清空${label}，释放 ${formatBytes(freed)}`)
+    message.success(`已清空${label}，释放 ${formatBytes(freed)}`)
   } catch (error) {
-    ElMessage.error(`清空失败：${String(error)}`)
+    message.error(`清空失败：${String(error)}`)
   } finally {
     busy.value = ''
   }
@@ -296,10 +297,11 @@ async function clear(target: 'cache' | 'temp') {
             link
             type="primary"
             size="small"
-            :loading="updateState === 'checking'"
             @click="handleCheckUpdate"
           >
-            <el-icon><Refresh /></el-icon>
+            <el-icon>
+              <component :is="updateState === 'checking' ? 'RefreshRight' : 'Refresh'" />
+            </el-icon>
             <span>检查更新</span>
           </el-button>
         </div>
@@ -543,9 +545,9 @@ async function clear(target: 'cache' | 'temp') {
 }
 
 .about {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 10px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 
   &__item {
     display: flex;

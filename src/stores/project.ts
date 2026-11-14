@@ -153,11 +153,12 @@ export const useProjectStore = defineStore('project', {
       this.persist()
     },
 
-    /** 拖拽排序：把 draggedId 移动到 targetId 所在位置，并持久化 */
-    moveProject(draggedId: string, targetId: string) {
-      const from = this.projects.findIndex((item) => item.id === draggedId)
-      const to = this.projects.findIndex((item) => item.id === targetId)
-      if (from < 0 || to < 0 || from === to) return
+    /** 拖拽排序：把指定项目移动到目标下标（以移除该项后的列表为准），并持久化 */
+    moveProjectTo(id: string, index: number) {
+      const from = this.projects.findIndex((item) => item.id === id)
+      if (from < 0) return
+      const to = Math.max(0, Math.min(index, this.projects.length - 1))
+      if (from === to) return
       const [item] = this.projects.splice(from, 1)
       this.projects.splice(to, 0, item)
       this.persist()

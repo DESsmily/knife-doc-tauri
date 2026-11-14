@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { message } from '@/core/message'
 
 import MethodTag from '@/components/common/MethodTag.vue'
 import { apiDetailToQuickRequest } from '@/core/apiToQuick'
@@ -192,7 +192,7 @@ async function copyPathFromMenu() {
   const api = menuState.api
   if (!api) return
   const ok = await copyText(api.fullPath)
-  ElMessage[ok ? 'success' : 'warning'](ok ? '接口路径已复制' : '复制失败')
+  message[ok ? 'success' : 'warning'](ok ? '接口路径已复制' : '复制失败')
   closeContextMenu()
 }
 
@@ -202,12 +202,12 @@ async function copyMarkdownFromMenu() {
   if (!api) return
   const detail = docStore.parser?.getDetail(api.id) ?? null
   if (!detail) {
-    ElMessage.warning('未获取到接口详情，无法生成 Markdown')
+    message.warning('未获取到接口详情，无法生成 Markdown')
     closeContextMenu()
     return
   }
   const ok = await copyText(generateMarkdown(detail))
-  ElMessage[ok ? 'success' : 'warning'](ok ? 'Markdown 已复制' : '复制失败')
+  message[ok ? 'success' : 'warning'](ok ? 'Markdown 已复制' : '复制失败')
   closeContextMenu()
 }
 
@@ -217,7 +217,7 @@ async function copyTsExample() {
   if (!api) return
   const detail = docStore.parser?.getDetail(api.id) ?? null
   if (!detail) {
-    ElMessage.warning('未获取到接口详情，无法生成 TS 示例')
+    message.warning('未获取到接口详情，无法生成 TS 示例')
     closeContextMenu()
     return
   }
@@ -228,7 +228,7 @@ async function copyTsExample() {
   }
   const text = generateTypeTypes(ctx)
   const ok = await copyText(text)
-  ElMessage[ok ? 'success' : 'warning'](ok ? 'TS 示例已复制' : '复制失败')
+  message[ok ? 'success' : 'warning'](ok ? 'TS 示例已复制' : '复制失败')
   closeContextMenu()
 }
 
@@ -238,7 +238,7 @@ function addToQuickRequest() {
   if (!api) return
   const detail = docStore.parser?.getDetail(api.id) ?? null
   if (!detail) {
-    ElMessage.warning('未获取到接口详情，无法添加到快捷请求')
+    message.warning('未获取到接口详情，无法添加到快捷请求')
     closeContextMenu()
     return
   }
@@ -246,7 +246,7 @@ function addToQuickRequest() {
   const globalParams = globalParamStore.enabled
   const snapshot = apiDetailToQuickRequest(detail, baseUrl, globalParams)
   const request = quickStore.addRequest(snapshot)
-  ElMessage.success(`已添加快捷请求「${request.name}」`)
+  message.success(`已添加快捷请求「${request.name}」`)
   closeContextMenu()
 }
 

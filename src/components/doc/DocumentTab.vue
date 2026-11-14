@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { message } from '@/core/message'
 
 import CodeBlock from '@/components/common/CodeBlock.vue'
 import MarkdownText from '@/components/common/MarkdownText.vue'
@@ -140,7 +140,7 @@ function codeStatusType(code: string): 'success' | 'warning' | 'danger' | 'info'
 
 async function copy(text: string, tip: string) {
   const ok = await copyText(text)
-  ElMessage[ok ? 'success' : 'warning'](ok ? tip : '复制失败')
+  message[ok ? 'success' : 'warning'](ok ? tip : '复制失败')
 }
 
 function copyAddress() {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { message } from '@/core/message'
 
 import EmptyState from '@/components/common/EmptyState.vue'
 import MethodTag from '@/components/common/MethodTag.vue'
@@ -50,7 +50,7 @@ const viewMode = ref<'doc' | 'quick'>('doc')
 /** 进入快捷请求视图：把当前接口派生为快捷请求并打开 */
 function enterQuickView() {
   if (!detail.value) {
-    ElMessage.warning('请先选择左侧的接口')
+    message.warning('请先选择左侧的接口')
     return
   }
   // 按「方法 + 地址」去重，已存在则复用，否则新建
@@ -88,7 +88,7 @@ const loaderText = computed(() => {
 async function bootstrap(projectId: string) {
   const found = projectStore.projects.find((item) => item.id === projectId)
   if (!found) {
-    ElMessage.warning('项目不存在或已被删除')
+    message.warning('项目不存在或已被删除')
     void router.replace({ name: 'projects' })
     return
   }
@@ -122,9 +122,9 @@ async function handleRefreshAll() {
   refreshing.value = true
   try {
     await docStore.reloadAll()
-    ElMessage.success('文档已重新加载')
+    message.success('文档已重新加载')
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '重新加载失败')
+    message.error(error instanceof Error ? error.message : '重新加载失败')
   } finally {
     refreshing.value = false
   }
@@ -134,9 +134,9 @@ async function handleReloadGroup() {
   refreshing.value = true
   try {
     await docStore.reloadCurrentGroup()
-    ElMessage.success('当前分组已刷新')
+    message.success('当前分组已刷新')
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '刷新失败')
+    message.error(error instanceof Error ? error.message : '刷新失败')
   } finally {
     refreshing.value = false
   }
@@ -150,7 +150,7 @@ function openModel(name: string) {
 
 async function handleCopyBase() {
   const ok = await copyText(baseUrl.value)
-  ElMessage[ok ? 'success' : 'warning'](ok ? '后端地址已复制' : '复制失败')
+  message[ok ? 'success' : 'warning'](ok ? '后端地址已复制' : '复制失败')
 }
 
 function backToList() {

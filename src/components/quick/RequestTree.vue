@@ -4,7 +4,8 @@
  */
 
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
-import { ElMessage, ElMessageBox, useZIndex, type DropdownInstance } from 'element-plus'
+import { ElMessageBox, useZIndex, type DropdownInstance } from 'element-plus'
+import { message } from '@/core/message'
 
 import MethodTag from '@/components/common/MethodTag.vue'
 import { fromNow } from '@/core/utils'
@@ -115,7 +116,7 @@ function moveTo(folderId: string) {
   store.move(current.requestId, folderId)
   closeFlyout()
   menus.get(current.requestId)?.handleClose()
-  ElMessage.success(`已移动到「${target?.name ?? '未分类'}」`)
+  message.success(`已移动到「${target?.name ?? '未分类'}」`)
 }
 
 onBeforeUnmount(() => {
@@ -124,7 +125,7 @@ onBeforeUnmount(() => {
 
 function createRequest(folderId = '') {
   const request = store.addRequest({ folderId })
-  ElMessage.success('已新建请求，填写地址后即可发送')
+  message.success('已新建请求，填写地址后即可发送')
   return request
 }
 
@@ -176,11 +177,11 @@ async function removeFolder(id: string, name: string, count: number) {
       }
     )
     store.removeFolder(id, true)
-    ElMessage.success('分类及其请求已删除')
+    message.success('分类及其请求已删除')
   } catch (action) {
     if (action === 'cancel') {
       store.removeFolder(id, false)
-      ElMessage.success('请求已移到未分类')
+      message.success('请求已移到未分类')
     }
     /* close = 放弃操作 */
   }
@@ -216,9 +217,9 @@ async function exportAll() {
   try {
     const path = await exportJson('knife-doc-quick-requests.json', store.exportData())
     if (!path) return
-    ElMessage.success(isTauri ? `已导出到 ${path}` : '已导出请求集合')
+    message.success(isTauri ? `已导出到 ${path}` : '已导出请求集合')
   } catch (error) {
-    ElMessage.error(`导出失败：${String(error)}`)
+    message.error(`导出失败：${String(error)}`)
   }
 }
 
@@ -230,9 +231,9 @@ async function importAll(event: Event) {
   try {
     const text = await file.text()
     const added = store.importData(JSON.parse(text))
-    ElMessage.success(`导入完成，新增 ${added} 条请求`)
+    message.success(`导入完成，新增 ${added} 条请求`)
   } catch (error) {
-    ElMessage.error(`导入失败：${String(error)}`)
+    message.error(`导入失败：${String(error)}`)
   }
 }
 
@@ -243,19 +244,19 @@ async function onDrop(event: DragEvent) {
   event.preventDefault()
   try {
     store.importData(JSON.parse(await file.text()))
-    ElMessage.success('已导入拖入的请求文件')
+    message.success('已导入拖入的请求文件')
   } catch (error) {
-    ElMessage.error(`导入失败：${String(error)}`)
+    message.error(`导入失败：${String(error)}`)
   }
 }
 
 async function saveToTemp() {
   if (!isTauri) {
-    ElMessage.info('临时文件仅桌面客户端可用')
+    message.info('临时文件仅桌面客户端可用')
     return
   }
   const path = await saveTempFile('quick-requests.json', JSON.stringify(store.exportData(), null, 2))
-  ElMessage.success(`已写入临时目录：${path}`)
+  message.success(`已写入临时目录：${path}`)
 }
 </script>
 

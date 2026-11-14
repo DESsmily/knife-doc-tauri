@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { message } from '@/core/message'
 
 import type { GlobalParam, GlobalParamIn } from '@/core/types'
 import { deepClone, uid } from '@/core/utils'
@@ -45,7 +45,7 @@ const enabledCount = computed(() => draft.value.filter((item) => item.enabled).l
 function addRow(location: GlobalParamIn, preset?: { name: string; description: string }) {
   const name = preset?.name ?? ''
   if (name && draft.value.some((item) => item.in === location && item.name === name)) {
-    ElMessage.warning(`「${name}」已存在`)
+    message.warning(`「${name}」已存在`)
     return
   }
   draft.value.push({
@@ -69,7 +69,7 @@ function toggleAll(enabled: boolean) {
 function handleSave() {
   const invalid = draft.value.find((item) => !String(item.name ?? '').trim())
   if (invalid) {
-    ElMessage.warning('存在未填写参数名的行，请补充完整')
+    message.warning('存在未填写参数名的行，请补充完整')
     return
   }
   const duplicated = draft.value.find(
@@ -77,13 +77,13 @@ function handleSave() {
       draft.value.findIndex((other) => other.in === item.in && other.name === item.name) !== index
   )
   if (duplicated) {
-    ElMessage.warning(`参数「${duplicated.name}」重复，请检查`)
+    message.warning(`参数「${duplicated.name}」重复，请检查`)
     return
   }
   globalParamStore.replaceAll(
     draft.value.map((item) => ({ ...item, name: item.name.trim(), value: String(item.value ?? '') }))
   )
-  ElMessage.success('全局参数已保存')
+  message.success('全局参数已保存')
   visible.value = false
   emit('saved')
 }

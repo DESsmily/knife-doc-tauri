@@ -120,6 +120,20 @@ kbd {
   @include ellipsis(1);
 }
 
+// 页面搜索高亮（Ctrl+F 唤起，mark 由 usePageSearch 动态注入页面内容，需为全局样式）
+mark[data-kd-search] {
+  background: var(--kd-primary-soft);
+  color: var(--kd-primary);
+  border-radius: 2px;
+  padding: 0 1px;
+
+  &.is-kd-search-active {
+    background: var(--kd-primary);
+    color: #fff;
+    box-shadow: 0 0 0 2px var(--kd-primary);
+  }
+}
+
 .kd-mono {
   font-family: $font-mono;
 }

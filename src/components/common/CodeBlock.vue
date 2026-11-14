@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { message } from '@/core/message'
 
 import { copyText } from '@/core/http'
 import { detectLang, highlight, type HighlightLang } from '@/core/highlight'
@@ -297,7 +297,7 @@ async function handleCopy() {
     copied.value = true
     setTimeout(() => (copied.value = false), 1600)
   } else {
-    ElMessage.warning('复制失败，请手动选择内容复制')
+    message.warning('复制失败，请手动选择内容复制')
   }
 }
 </script>

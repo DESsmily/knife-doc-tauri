@@ -7,7 +7,7 @@
  */
 
 import { computed, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { message } from '@/core/message'
 
 import CodeBlock from '@/components/common/CodeBlock.vue'
 import { copyText, decodeBodyBytes, type DebugRequestOptions, type DebugResponseResult } from '@/core/http'
@@ -300,13 +300,13 @@ const sizeLabel = computed(() => formatBytes(props.response?.size ?? 0))
 
 async function copyBody() {
   const ok = await copyText(displayBody.value || bodyText.value)
-  ElMessage[ok ? 'success' : 'warning'](ok ? '响应内容已复制' : '复制失败')
+  message[ok ? 'success' : 'warning'](ok ? '响应内容已复制' : '复制失败')
 }
 
 function saveBody() {
   const text = displayBody.value || bodyText.value
   if (!text) {
-    ElMessage.warning('还没有可保存的响应')
+    message.warning('还没有可保存的响应')
     return
   }
   emit('save', text)

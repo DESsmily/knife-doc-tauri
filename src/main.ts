@@ -14,6 +14,7 @@ import router from './router'
 import { CORSFetch } from 'tauri-plugin-better-cors-fetch'
 import { isTauri } from '@/core/tauri'
 import { initStorage } from '@/core/storage'
+import { openPageSearch } from '@/composables/usePageSearch'
 import { useAppStore } from '@/stores/app'
 import { useGlobalParamStore } from '@/stores/globalParam'
 import { useProjectStore } from '@/stores/project'
@@ -39,13 +40,14 @@ for (const [name, component] of Object.entries(ElementPlusIcons)) {
 window.addEventListener('contextmenu', (event) => event.preventDefault())
 
 /**
- * 生产环境下禁用浏览器 / WebView 的刷新类快捷键。
+ * 生产环境下禁用浏览器 / WebView 的刷新类与查找类快捷键。
  *
  * 桌面客户端中 Ctrl+R / Ctrl+Shift+R / F5 会触发 WebView 整页刷新，丢失当前
- * 请求状态与已加载的文档，属于无效操作，应当屏蔽。开发调试环境保留这些快捷键，
+ * 请求状态与已加载的文档，属于无效操作，应当屏蔽。Ctrl+F 会触发浏览器原生
+ * 查找，屏蔽后改为唤起本应用的自定义页面搜索框。开发调试环境保留这些快捷键，
  * 以便在浏览器预览或 tauri dev 时排查问题。
  *
- * 使用 capture 阶段尽早拦截，避免 WebView 先完成刷新再被阻止。
+ * 使用 capture 阶段尽早拦截，避免 WebView 先完成刷新 / 查找再被阻止。
  */
 if (import.meta.env.PROD) {
   window.addEventListener(
@@ -56,10 +58,16 @@ if (import.meta.env.PROD) {
         event.preventDefault()
         return
       }
-      // Ctrl/Cmd + R：普通刷新；按住 Shift 时即强制刷新（Ctrl+Shift+R）
       const mod = event.ctrlKey || event.metaKey
+      // Ctrl/Cmd + R：普通刷新；按住 Shift 时即强制刷新（Ctrl+Shift+R）
       if (mod && event.key.toLowerCase() === 'r') {
         event.preventDefault()
+        return
+      }
+      // Ctrl/Cmd + F：浏览器原生查找，改为唤起自定义搜索框
+      if (mod && event.key.toLowerCase() === 'f') {
+        event.preventDefault()
+        openPageSearch()
       }
     },
     { capture: true }
