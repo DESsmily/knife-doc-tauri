@@ -27,18 +27,18 @@
     ],
     "security": {
       "csp": null
-    },
-    "plugins": {
-      "updater": {
-        "active": true,
-        "endpoints": [
-          "https://github.com/DESsmily/knife-doc-tauri/releases/latest/download/latest.json"
-        ],
-        "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQzNUJBODAzNzNDODM3OEUKUldTT044aHpBNmhiMDFVc1pVckgxYVlnOElLM2kwN04ydkg0SVJoeENVU3N0dHUwYmpMaUlpMHcK",
-        "dialog": true,
-        "windows": {
-          "installMode": "passive"
-        }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/DESsmily/knife-doc-tauri/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQzNUJBODAzNzNDODM3OEUKUldTT044aHpBNmhiMDFVc1pVckgxYVlnOElLM2kwN04ydkg0SVJoeENVU3N0dHUwYmpMaUlpMHcK",
+      "dialog": true,
+      "windows": {
+        "installMode": "passive"
       }
     }
   },
