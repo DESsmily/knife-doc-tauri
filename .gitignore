@@ -18,6 +18,9 @@ dist-ssr
 *.msi
 *.exe
 
+# 更新签名私钥（敏感信息，严禁提交）
+.tauri
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

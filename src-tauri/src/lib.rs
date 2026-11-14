@@ -24,6 +24,7 @@ pub fn run() {
         .plugin(tauri_plugin_better_cors_fetch::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::default().build())
         // 数据文件是整份读写的，必须保证只有一个实例，否则两个窗口会互相覆盖。
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             tray::show_main(app);

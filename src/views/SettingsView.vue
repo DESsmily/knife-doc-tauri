@@ -10,6 +10,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { formatBytes } from '@/core/utils'
 import { useAppStore } from '@/stores/app'
 import { useTheme } from '@/composables/useTheme'
+import { checkForUpdate, downloadAndInstallUpdate, type UpdateInfo } from '@/core/updater'
+import { isTauri } from '@/core/tauri'
 import type { CloseBehavior, DirTarget, ThemeModeSetting } from '@/core/tauri'
 
 const appStore = useAppStore()
@@ -17,6 +19,54 @@ const router = useRouter()
 const { setTheme } = useTheme()
 
 const busy = ref('')
+
+/* ------------------------------ 软件更新 ------------------------------ */
+
+/** 当前版本（桌面端从 appStore.info 获取，浏览器预览显示固定值） */
+const appVersion = computed(() => appStore.info?.version ?? '开发模式')
+
+const updateState = ref<'idle' | 'checking' | 'available' | 'downloading' | 'installed'>('idle')
+const updateInfo = ref<UpdateInfo | null>(null)
+const downloadProgress = ref(0)
+
+async function handleCheckUpdate() {
+  if (!isTauri) {
+    ElMessage.info('自动更新仅在桌面客户端可用')
+    return
+  }
+  updateState.value = 'checking'
+  updateInfo.value = null
+  try {
+    const info = await checkForUpdate()
+    if (info) {
+      updateInfo.value = info
+      updateState.value = 'available'
+      ElMessage.success(`发现新版本 ${info.version}`)
+    } else {
+      updateState.value = 'idle'
+      ElMessage.success('当前已是最新版本')
+    }
+  } catch {
+    updateState.value = 'idle'
+    ElMessage.error('检查更新失败，请检查网络连接')
+  }
+}
+
+async function handleInstallUpdate() {
+  if (!updateInfo.value) return
+  updateState.value = 'downloading'
+  downloadProgress.value = 0
+  try {
+    await downloadAndInstallUpdate(updateInfo.value.rid, (chunk) => {
+      downloadProgress.value += chunk
+    })
+    updateState.value = 'installed'
+    ElMessage.success('更新已下载并安装，请重启应用以生效')
+  } catch {
+    updateState.value = 'available'
+    ElMessage.error('下载更新失败，请稍后重试')
+  }
+}
 
 onMounted(() => {
   void appStore.refreshUsage()
@@ -236,6 +286,55 @@ async function clear(target: 'cache' | 'temp') {
 
       <section class="card">
         <h2 class="card__title">
+          <el-icon><RefreshRight /></el-icon>
+          <span>软件更新</span>
+        </h2>
+        <div class="row">
+          <span class="row__label">当前版本</span>
+          <code class="path kd-mono">{{ appVersion }}</code>
+          <el-button
+            link
+            type="primary"
+            size="small"
+            :loading="updateState === 'checking'"
+            @click="handleCheckUpdate"
+          >
+            <el-icon><Refresh /></el-icon>
+            <span>检查更新</span>
+          </el-button>
+        </div>
+
+        <!-- 有可用更新 -->
+        <div v-if="updateState === 'available' && updateInfo" class="update-box">
+          <div class="update-box__head">
+            <el-tag type="success" size="small" effect="dark">新版本 {{ updateInfo.version }}</el-tag>
+            <span v-if="updateInfo.date" class="update-box__date">{{ updateInfo.date }}</span>
+          </div>
+          <p v-if="updateInfo.body" class="update-box__body">{{ updateInfo.body }}</p>
+          <el-button type="primary" size="small" @click="handleInstallUpdate">
+            <el-icon><Download /></el-icon>
+            <span>下载并安装</span>
+          </el-button>
+        </div>
+
+        <!-- 下载中 -->
+        <div v-if="updateState === 'downloading'" class="update-box">
+          <el-progress :percentage="Math.min(100, Math.round((downloadProgress / 1048576) * 10) / 10 || 5)" :status="'success'" />
+          <p class="update-box__hint">正在下载更新…已下载 {{ (downloadProgress / 1048576).toFixed(1) }} MB</p>
+        </div>
+
+        <!-- 已安装，待重启 -->
+        <div v-if="updateState === 'installed'" class="update-box">
+          <el-alert type="success" :closable="false" show-icon title="更新已安装" description="请关闭并重新打开应用以使用新版本。" />
+        </div>
+
+        <p class="card__foot">
+          更新源为 GitHub Releases，更新包经签名校验后安装，确保来源可信。
+        </p>
+      </section>
+
+      <section class="card">
+        <h2 class="card__title">
           <el-icon><InfoFilled /></el-icon>
           <span>关于</span>
         </h2>
@@ -407,6 +506,40 @@ async function clear(target: 'cache' | 'temp') {
 
 .file-table {
   width: 100%;
+}
+
+.update-box {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: $radius-md;
+  background: var(--kd-panel-2);
+  border: 1px solid var(--kd-border);
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  &__date {
+    font-size: $font-xs;
+    color: var(--kd-text-3);
+  }
+
+  &__body {
+    margin: 0 0 10px;
+    font-size: $font-sm;
+    color: var(--kd-text-2);
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+
+  &__hint {
+    margin: 8px 0 0;
+    font-size: $font-xs;
+    color: var(--kd-text-3);
+  }
 }
 
 .about {
