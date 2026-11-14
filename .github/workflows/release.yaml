@@ -35,13 +35,13 @@ jobs:
         run: |
           node scripts/extract-changelog.mjs "${{ github.ref_name }}" > "$RUNNER_TEMP/changelog.md"
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          releaseName: ${{ github.ref_name }}
+          releaseName: "Release ${{ github.ref_name }}"
           tagName: ${{ github.ref_name }}
           releaseDraft: false
           prerelease: false
