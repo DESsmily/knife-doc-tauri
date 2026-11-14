@@ -35,7 +35,7 @@
       "endpoints": [
         "https://github.com/DESsmily/knife-doc-tauri/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ5NTUwMkRFNEVFRjI4NjIKUldSaUtPOU8zZ0pWU1Z3RG5sQ2ZIMTcxYkM3TGJnYkVKdEw3WmtvVkZIVG9pLy82NzRtQkdhMFEK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJEN0M3N0IxRTZCNzJGRDkKUldUWkw3Zm1zWGQ4dlZNUUFVUmM3MmxCaUpjK0ZRR1A4MG9UWU1IMjBvNTFncGJuaTg3a2RwSlgK",
       "dialog": true,
       "windows": {
         "installMode": "passive"
