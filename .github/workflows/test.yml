@@ -1,0 +1,95 @@
+name: Debug Signing Secret
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Diagnose TAURI_SIGNING_PRIVATE_KEY format
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          echo "=================================================="
+          echo " TAURI_SIGNING_PRIVATE_KEY / PASSWORD 诊断"
+          echo "=================================================="
+          echo "提示：日志里的 *** 是 GitHub 自动脱敏，属正常现象。"
+          echo ""
+
+          if [ -z "$KEY" ]; then
+            echo "❌ KEY 为空：Secret 未设置或值为空字符串。"
+            exit 1
+          fi
+          echo "✅ KEY 非空"
+
+          # 用 printf 写入，避免 echo 引入额外换行
+          printf '%s' "$KEY" > /tmp/key.txt
+
+          echo ""
+          echo "----- 1. 基础统计 -----"
+          echo "字节数: $(wc -c < /tmp/key.txt)"
+          echo "行数 (awk NR, 准确): $(awk 'END{print NR}' /tmp/key.txt)"
+          echo "行数 (wc -l, 仅统计换行符): $(wc -l < /tmp/key.txt)"
+
+          echo ""
+          echo "----- 2. 换行符与 BOM 检查 -----"
+          if grep -q $'\r' /tmp/key.txt; then
+            echo "⚠️ 检测到 CR (\\r)：密钥文件是 CRLF 换行（常见于 Windows 记事本）。"
+          else
+            echo "✅ 未检测到 CR (\\r)：换行符为 LF。"
+          fi
+
+          LAST_BYTE=$(tail -c 1 /tmp/key.txt | xxd -p)
+          if [ "$LAST_BYTE" = "0a" ]; then
+            echo "✅ 文件末尾以换行符 (0a) 结束。"
+          else
+            echo "⚠️ 文件末尾不是换行符 (最后字节: $LAST_BYTE)。"
+          fi
+
+          BOM=$(head -c 3 /tmp/key.txt | xxd -p)
+          if [ "$BOM" = "efbbbf" ]; then
+            echo "❌ 检测到 UTF-8 BOM (EF BB BF)！这会导致首行解析失败。"
+          else
+            echo "✅ 未检测到 UTF-8 BOM。"
+          fi
+
+          echo ""
+          echo "----- 3. 逐行结构（每行最多显示前 40 字符） -----"
+          awk '{ printf "第 %d 行 | 长度=%d | 前 40 字符: [%s]\n", NR, length($0), substr($0, 1, 40) }' /tmp/key.txt
+
+          echo ""
+          echo "----- 4. Minisign 格式校验 -----"
+          FIRST_LINE_CLEAN=$(head -n1 /tmp/key.txt | tr -d '\r')
+          if [[ "$FIRST_LINE_CLEAN" == "untrusted comment:"* ]]; then
+            echo "✅ 第一行以 'untrusted comment:' 开头（去掉 CR 后）。"
+          else
+            echo "❌ 第一行不以 'untrusted comment:' 开头！"
+            echo "   实际前 60 字符: [${FIRST_LINE_CLEAN:0:60}]"
+          fi
+
+          SECOND_LINE=$(sed -n '2p' /tmp/key.txt | tr -d '\r')
+          if [ -z "$SECOND_LINE" ]; then
+            echo "❌ 第二行为空：密钥正文缺失。"
+          else
+            echo "第二行长度: ${#SECOND_LINE}"
+            if [[ "$SECOND_LINE" =~ ^[A-Za-z0-9+/=]+$ ]]; then
+              echo "✅ 第二行符合 Base64 字符集。"
+            else
+              echo "❌ 第二行包含非 Base64 字符（可能被意外修改）。"
+            fi
+          fi
+
+          echo ""
+          echo "----- 5. PASSWORD 检查 -----"
+          if [ -z "$PASSWORD" ]; then
+            echo "⚠️ PASSWORD 为空。"
+          else
+            echo "✅ PASSWORD 非空，长度: ${#PASSWORD}"
+          fi
+
+          echo ""
+          echo "=================================================="
+          echo " 诊断完成"
+          echo "=================================================="
