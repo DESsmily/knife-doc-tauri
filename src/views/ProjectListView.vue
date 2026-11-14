@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 
@@ -140,42 +140,128 @@ async function handleRemove(project: DocProject) {
 /* ------------------------------ 打开 / 探测 ---------------------------- */
 
 function openProject(project: DocProject) {
+  // 长按拖拽刚结束时抑制一次 click，避免松手后误触发打开项目
+  if (suppressClick.value) {
+    suppressClick.value = false
+    return
+  }
   projectStore.setCurrent(project.id)
   void router.push({ name: 'doc', params: { projectId: project.id } })
 }
 
-/* ------------------------------ 拖拽排序 ------------------------------ */
+/* ------------------------------ 拖拽排序（鼠标长按卡片拖动） ------------------------------ */
+// Tauri 的 WebView 对 HTML5 原生 draggable 支持不稳定，改用 Pointer Events 实现长按拖动：
+// 在卡片上按住超过阈值后进入拖拽模式，移动鼠标时卡片跟随并高亮目标卡片，松开完成排序。
+
+/** 长按触发拖拽的阈值（毫秒） */
+const LONG_PRESS_MS = 400
+/** 长按期间允许的移动容差（像素），超过则视为滚动/点击而非拖拽 */
+const PRESS_TOLERANCE = 8
 
 /** 正在拖拽的项目 id */
 const draggedId = ref('')
+/** 是否已进入拖拽模式（长按已触发） */
+const dragActive = ref(false)
+/** 拖拽预览跟随鼠标的偏移量（相对卡片按下时的原始位置） */
+const dragOffset = reactive({ x: 0, y: 0 })
 /** 当前悬停（作为放置目标）的项目 id */
 const dragOverId = ref('')
+/** 拖拽刚结束时抑制一次 click，避免松手后误触发打开项目 */
+const suppressClick = ref(false)
+
+/** 长按计时器句柄 */
+let pressTimer: number | undefined
+/** 长按起始位置，用于判断鼠标是否移动过大 */
+const pressStart = { x: 0, y: 0 }
 
 /** 搜索时禁用拖拽，避免在过滤列表上排序造成困惑 */
 const dragEnabled = computed(() => keyword.value.trim() === '')
 
-function onDragStart(project: DocProject) {
-  if (!dragEnabled.value) return
-  draggedId.value = project.id
+  /** 卡片 pointerdown：启动长按计时，超时后进入拖拽模式 */
+  function onCardPointerDown(project: DocProject, event: PointerEvent) {
+    if (!dragEnabled.value) return
+    // 仅响应鼠标左键 / 触摸 / 笔
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    // 在按钮 / 链接 / 表单等交互元素上按下时不启动拖拽，避免与按钮点击冲突
+    const target = event.target as HTMLElement | null
+    if (
+      target?.closest('button, a, input, select, textarea, label, [role="button"]')
+    ) {
+      return
+    }
+    pressStart.x = event.clientX
+    pressStart.y = event.clientY
+    pressTimer = window.setTimeout(() => {
+      draggedId.value = project.id
+      dragActive.value = true
+      dragOffset.x = 0
+      dragOffset.y = 0
+    }, LONG_PRESS_MS)
+  }
+
+/** 清理长按计时 */
+function clearPress() {
+  if (pressTimer !== undefined) {
+    clearTimeout(pressTimer)
+    pressTimer = undefined
+  }
 }
 
-function onDragEnd() {
-  draggedId.value = ''
-  dragOverId.value = ''
-}
-
-function onDragOver(project: DocProject, event: DragEvent) {
-  if (!draggedId.value || draggedId.value === project.id) return
+/** 全局 pointermove：未进入拖拽时移动过大取消长按；进入拖拽后跟随鼠标并计算目标 */
+function onPointerMove(event: PointerEvent) {
+  if (!dragActive.value) {
+    // 未进入拖拽：移动过大则取消长按，保留为普通点击
+    if (
+      Math.abs(event.clientX - pressStart.x) > PRESS_TOLERANCE ||
+      Math.abs(event.clientY - pressStart.y) > PRESS_TOLERANCE
+    ) {
+      clearPress()
+    }
+    return
+  }
+  // 进入拖拽：阻止文本选择等默认行为，更新预览位置
   event.preventDefault()
-  dragOverId.value = project.id
+  dragOffset.x = event.clientX - pressStart.x
+  dragOffset.y = event.clientY - pressStart.y
+  // 计算鼠标下方的目标卡片
+  dragOverId.value = findCardUnder(event.clientX, event.clientY)?.id ?? ''
 }
 
-function onDrop(project: DocProject) {
-  if (!draggedId.value || draggedId.value === project.id) return
-  projectStore.moveProject(draggedId.value, project.id)
+/** 全局 pointerup / pointercancel：完成排序或取消 */
+function onPointerUp() {
+  if (!dragActive.value) {
+    clearPress()
+    return
+  }
+  if (dragOverId.value && dragOverId.value !== draggedId.value) {
+    projectStore.moveProject(draggedId.value, dragOverId.value)
+  }
   draggedId.value = ''
+  dragActive.value = false
   dragOverId.value = ''
+  dragOffset.x = 0
+  dragOffset.y = 0
+  suppressClick.value = true
 }
+
+  /** 根据坐标找到鼠标下方的卡片，返回其项目 id（排除正在拖拽的卡片） */
+  function findCardUnder(x: number, y: number): DocProject | null {
+    const cards = document.querySelectorAll<HTMLElement>('.project-card')
+    for (const card of cards) {
+      const id = card.dataset.id
+      if (!id || id === draggedId.value) continue
+      const rect = card.getBoundingClientRect()
+      if (
+        x >= rect.left &&
+        x <= rect.right &&
+        y >= rect.top &&
+        y <= rect.bottom
+      ) {
+        return projectStore.projects.find((item) => item.id === id) ?? null
+      }
+    }
+    return null
+  }
 
 /** 记录中的接口数量等信息 */
 function metaText(project: DocProject): string {
@@ -219,6 +305,17 @@ async function handleCopyUrl(project: DocProject) {
 onMounted(() => {
   projectStore.init()
   if (projectStore.projects.length > 0) void checkAll()
+  // 拖拽期间需在卡片之外也能收到 pointermove / pointerup，注册到 window
+  window.addEventListener('pointermove', onPointerMove, { passive: false })
+  window.addEventListener('pointerup', onPointerUp)
+  window.addEventListener('pointercancel', onPointerUp)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerup', onPointerUp)
+  window.removeEventListener('pointercancel', onPointerUp)
+  clearPress()
 })
 </script>
 
@@ -283,10 +380,15 @@ onMounted(() => {
             'is-dragging': draggedId === project.id,
             'is-drag-over': dragOverId === project.id && draggedId !== project.id
           }"
-          :style="{ '--card-color': project.color }"
+          :style="{
+            '--card-color': project.color,
+            transform:
+              draggedId === project.id
+                ? `translate(${dragOffset.x}px, ${dragOffset.y}px) scale(0.98)`
+                : undefined
+          }"
+          @pointerdown="onCardPointerDown(project, $event)"
           @click="openProject(project)"
-          @dragover="onDragOver(project, $event)"
-          @drop="onDrop(project)"
         >
           <div class="project-card__bar" />
 
@@ -299,15 +401,12 @@ onMounted(() => {
               <span class="project-card__time">最近访问：{{ fromNow(project.lastOpened) }}</span>
             </div>
 
-            <!-- 拖拽手柄：仅在非搜索状态下可拖动 -->
+            <!-- 拖拽手柄：仅作视觉提示，实际长按整张卡片即可拖动排序 -->
             <span
               v-if="dragEnabled"
               class="project-card__drag"
-              title="拖动排序"
-              draggable="true"
+              title="长按卡片拖动排序"
               @click.stop
-              @dragstart="onDragStart(project)"
-              @dragend="onDragEnd"
             >
               <el-icon><Rank /></el-icon>
             </span>
@@ -499,8 +598,11 @@ onMounted(() => {
   }
 
   &.is-dragging {
-    opacity: 0.4;
-    transform: scale(0.98);
+    opacity: 0.7;
+    z-index: 20;
+    box-shadow: var(--kd-shadow-lg);
+    cursor: grabbing;
+    user-select: none;
   }
 
   &.is-drag-over {

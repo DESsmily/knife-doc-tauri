@@ -39,6 +39,34 @@ for (const [name, component] of Object.entries(ElementPlusIcons)) {
 window.addEventListener('contextmenu', (event) => event.preventDefault())
 
 /**
+ * 生产环境下禁用浏览器 / WebView 的刷新类快捷键。
+ *
+ * 桌面客户端中 Ctrl+R / Ctrl+Shift+R / F5 会触发 WebView 整页刷新，丢失当前
+ * 请求状态与已加载的文档，属于无效操作，应当屏蔽。开发调试环境保留这些快捷键，
+ * 以便在浏览器预览或 tauri dev 时排查问题。
+ *
+ * 使用 capture 阶段尽早拦截，避免 WebView 先完成刷新再被阻止。
+ */
+if (import.meta.env.PROD) {
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      // F5：直接刷新
+      if (event.key === 'F5') {
+        event.preventDefault()
+        return
+      }
+      // Ctrl/Cmd + R：普通刷新；按住 Shift 时即强制刷新（Ctrl+Shift+R）
+      const mod = event.ctrlKey || event.metaKey
+      if (mod && event.key.toLowerCase() === 'r') {
+        event.preventDefault()
+      }
+    },
+    { capture: true }
+  )
+}
+
+/**
  * 请求接管与数据加载都要在挂载前完成：
  * CORSFetch.init() 把 window.fetch / XMLHttpRequest 换成由 Rust 发出的实现（原生实现
  * 保留在 window.fetchNative），这样文档探测与调试请求都不受同源策略限制；
