@@ -7,7 +7,7 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     environment:
-      name: tauri-build
+      name: Tauri build
     steps:
       - name: Diagnose TAURI_SIGNING_PRIVATE_KEY format
         env:

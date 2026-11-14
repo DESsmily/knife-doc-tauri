@@ -19,7 +19,7 @@ jobs:
           #   args: --target x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.platform }}
     environment:
-      name: tauri-build
+      name: Tauri build
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
