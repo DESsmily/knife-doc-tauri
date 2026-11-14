@@ -7,12 +7,14 @@ import MarkdownText from '@/components/common/MarkdownText.vue'
 import MethodTag from '@/components/common/MethodTag.vue'
 import ParamTable, { type ParamRow } from '@/components/doc/ParamTable.vue'
 import { copyText } from '@/core/http'
-import type { ApiDetail, ApiParam, GlobalParam } from '@/core/types'
+import { generateMarkdown, generateTypeTypes, type ScriptContext } from '@/core/scriptGenerator'
+import type { ApiDetail, ApiParam, GlobalParam, SchemaModel } from '@/core/types'
 
 const props = defineProps<{
   detail: ApiDetail
   globalParams: GlobalParam[]
   baseUrl: string
+  models: SchemaModel[]
 }>()
 
 const emit = defineEmits<{
@@ -146,35 +148,21 @@ function copyAddress() {
 }
 
 function copyMarkdown() {
-  const d = props.detail
-  const lines = [
-    `## ${d.summary}`,
-    '',
-    `> ${d.method} ${d.fullPath}`,
-    '',
-    d.description ? `${d.description}\n` : '',
-    '### 请求参数',
-    '',
-    '| 参数名 | 位置 | 类型 | 必填 | 描述 |',
-    '| --- | --- | --- | --- | --- |',
-    ...props.detail.parameters
-      .filter((item) => item.level === 0)
-      .map(
-        (item) =>
-          `| ${item.name} | ${item.in} | ${item.type} | ${item.required ? '是' : '否'} | ${(item.description || '').replace(/\n/g, ' ')} |`
-      ),
-    '',
-    '### 请求示例',
-    '',
-    '```json',
-    d.requestExample || '{}',
-    '```'
-  ]
-  void copy(lines.filter((line) => line !== '').join('\n'), '接口 Markdown 已复制')
+  void copy(generateMarkdown(props.detail), '接口 Markdown 已复制')
 }
 
 function copyPath() {
   void copy(props.detail.fullPath, '接口路径已复制')
+}
+
+/** 复制 TS 示例类型（接口名称 + 入参类型 + 出参类型，出参不含 code/msg/data 包装层） */
+function copyTsExample() {
+  const ctx: ScriptContext = {
+    detail: props.detail,
+    baseUrl: props.baseUrl,
+    models: props.models
+  }
+  void copy(generateTypeTypes(ctx), 'TS 示例已复制')
 }
 </script>
 
@@ -198,6 +186,11 @@ function copyPath() {
           <el-tooltip content="复制为 Markdown" placement="top">
             <el-button link size="small" @click="copyMarkdown">
               <el-icon><Tickets /></el-icon>
+            </el-button>
+          </el-tooltip>
+          <el-tooltip content="复制 TS 示例" placement="top">
+            <el-button link size="small" @click="copyTsExample">
+              <el-icon><DocumentCopy /></el-icon>
             </el-button>
           </el-tooltip>
         </div>

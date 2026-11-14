@@ -60,13 +60,9 @@ export const useProjectStore = defineStore('project', {
     baseUrl(): string {
       return this.current?.baseUrl ?? ''
     },
-    /** 按最近访问时间排序 */
+    /** 项目列表：按存储顺序展示，不做自动排序（排序由用户拖拽控制） */
     sorted(state): DocProject[] {
-      return [...state.projects].sort((a, b) => {
-        const ta = a.lastOpened ?? a.createdAt
-        const tb = b.lastOpened ?? b.createdAt
-        return tb - ta
-      })
+      return [...state.projects]
     },
     count(state): number {
       return state.projects.length
@@ -142,19 +138,10 @@ export const useProjectStore = defineStore('project', {
       this.persist()
     },
 
-    /** 仅清除记录，不影响其它数据 */
+    /** 仅清除记录，不影响其它数据；不再自动更新最近访问时间，避免卡片顺序被自动打乱 */
     setCurrent(id: string) {
       this.currentId = id
       writeBucket('currentProject', id)
-      if (id) this.touch(id)
-    },
-
-    /** 记录一次访问 */
-    touch(id: string) {
-      const index = this.projects.findIndex((item) => item.id === id)
-      if (index < 0) return
-      this.projects.splice(index, 1, { ...this.projects[index], lastOpened: Date.now() })
-      this.persist()
     },
 
     /** 记录同步到的元信息（分组数 / 接口数等） */
@@ -163,6 +150,16 @@ export const useProjectStore = defineStore('project', {
       if (index < 0) return
       const merged: ProjectMeta = { ...this.projects[index].meta, ...meta, lastSyncAt: Date.now() }
       this.projects.splice(index, 1, { ...this.projects[index], meta: merged })
+      this.persist()
+    },
+
+    /** 拖拽排序：把 draggedId 移动到 targetId 所在位置，并持久化 */
+    moveProject(draggedId: string, targetId: string) {
+      const from = this.projects.findIndex((item) => item.id === draggedId)
+      const to = this.projects.findIndex((item) => item.id === targetId)
+      if (from < 0 || to < 0 || from === to) return
+      const [item] = this.projects.splice(from, 1)
+      this.projects.splice(to, 0, item)
       this.persist()
     }
   }

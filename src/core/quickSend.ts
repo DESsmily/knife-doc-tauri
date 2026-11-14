@@ -16,6 +16,11 @@ function enabled(list: QuickKV[]): QuickKV[] {
   return list.filter((item) => item.enabled && item.name.trim())
 }
 
+/** 是否为文件字段：优先按 type 判断，兼容旧数据里的 fileFields 标记 */
+function isFileRow(row: QuickKV, fileFields: string[]): boolean {
+  return row.type === 'file' || fileFields.includes(row.id)
+}
+
 /** 拼 query，允许同名键重复出现（与 Apifox 行为一致） */
 function withQuery(url: string, params: QuickKV[]): string {
   const pairs = enabled(params).map(
@@ -46,7 +51,8 @@ function applyAuth(request: QuickRequest, headers: Record<string, string>): Quic
         name: auth.keyName.trim(),
         value: auth.keyValue,
         enabled: true,
-        description: '鉴权参数'
+        description: '鉴权参数',
+        type: 'string'
       })
     }
   }
@@ -108,7 +114,7 @@ export function buildQuickPayload(
   } else if (body.mode === 'form') {
     const form = new FormData()
     for (const row of rows) {
-      if (body.fileFields.includes(row.id)) {
+      if (isFileRow(row, body.fileFields)) {
         for (const file of files[row.id] ?? []) {
           form.append(row.name, file)
           filePayload.push({ name: row.name, file })
@@ -133,7 +139,7 @@ export function buildQuickPayload(
     rawText: body.mode === 'json' || body.mode === 'raw' ? text : undefined,
     bodyMode: body.mode === 'form' ? 'formData' : body.mode === 'urlencoded' ? 'form' : body.mode,
     formFields: body.mode === 'form' || body.mode === 'urlencoded'
-      ? rows.filter((row) => !body.fileFields.includes(row.id)).map((row) => ({ name: row.name, value: row.value }))
+      ? rows.filter((row) => !isFileRow(row, body.fileFields)).map((row) => ({ name: row.name, value: row.value }))
       : [],
     files: filePayload
   }

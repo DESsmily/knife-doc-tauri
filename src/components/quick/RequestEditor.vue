@@ -299,6 +299,7 @@ watch(
               name-placeholder="Header 名称"
               value-placeholder="值"
               empty-text="没有自定义 Header"
+              name-autocomplete
               @change="markUnsaved"
             />
 
@@ -358,7 +359,7 @@ watch(
                 <p class="body-hint">
                   {{
                     request.body.mode === 'form'
-                      ? '勾选「文件」列后该行变成文件选择；文件本体只存在于本次会话，重新打开请求需要再选一次。'
+                      ? '将「类型」选为「文件」后该行变成文件选择；文件本体只存在于本次会话，重新打开请求需要再选一次。'
                       : '字段会按 application/x-www-form-urlencoded 编码进请求体。'
                   }}
                 </p>

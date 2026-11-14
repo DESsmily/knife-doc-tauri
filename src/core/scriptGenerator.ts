@@ -541,6 +541,215 @@ export function generateTypeScript(ctx: ScriptContext): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* 精简 TS 类型（接口名称 + 入参类型 + 出参类型）                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 生成「接口路径 + 入参类型 + 出参类型」的精简 TS 类型文本。
+ *
+ * 用于侧边栏右键「复制 TS 示例」与文档页「复制 TS 示例」按钮。输出格式：
+ *
+ * ```
+ * 接口路径
+ * <入参类型代码，无则省略>
+ * <出参类型代码，无则省略>
+ * ```
+ *
+ * 入参类型中 body 直接作为 Params 接口的成员内联，不再额外输出一层
+ * `export type XxxxBody = XXX`。出参类型对齐 TS 示例的返回类型：完整输出
+ * 引用的模型 interface 与响应类型定义（全量返回，不再剥除包装层）。
+ */
+export function generateTypeTypes(ctx: ScriptContext): string {
+  const { detail, models } = ctx
+  const name = functionNameOf(detail)
+  const pascal = name.charAt(0).toUpperCase() + name.slice(1)
+  const params = collectParamNames(detail)
+
+  const sections: string[] = [detail.fullPath]
+
+  /* ---------- 入参类型 ---------- */
+  const requestRefs = new Set<string>()
+  collectRefs(detail.parameters, requestRefs)
+
+  const requestLines: string[] = []
+  for (const model of renderRefModels(requestRefs, models)) {
+    requestLines.push(model)
+    requestLines.push('')
+  }
+
+  const paramsMembers: string[] = []
+  const pushMember = (param: ApiParam, locationLabel: string) => {
+    const key = isSafeIdentifier(param.name) ? param.name : `'${param.name}'`
+    const optional = param.required ? '' : '?'
+    const doc = fieldComment(param, `位置: ${locationLabel}`)
+    if (doc) paramsMembers.push(`  /** ${doc} */`)
+    paramsMembers.push(`  ${key}${optional}: ${tsTypeOf(param, 1, 'interface')}`)
+  }
+  for (const param of params.path) pushMember(param, 'path')
+  for (const param of params.query) pushMember(param, 'query')
+  for (const param of params.header) pushMember(param, 'header')
+
+  // body 直接内联进 Params 接口，不单独输出 export type XxxBody
+  const bodyParam = params.body[0]
+  if (bodyParam) {
+    const bodyType = tsTypeOf(bodyParam as ApiParam, 1, 'interface')
+    const doc = fieldComment(bodyParam, '位置: body')
+    if (doc) paramsMembers.push(`  /** ${doc} */`)
+    paramsMembers.push(`  body?: ${bodyType}`)
+  }
+
+  if (paramsMembers.length > 0) {
+    requestLines.push(`/** ${detail.summary} 请求参数 */`)
+    requestLines.push(`export interface ${pascal}Params {`)
+    requestLines.push(...paramsMembers)
+    requestLines.push('}')
+    requestLines.push('')
+  }
+
+  const requestCode = requestLines.join('\n').trimEnd()
+  if (requestCode) sections.push(requestCode)
+
+  /* ---------- 出参类型（全量返回，对齐 TS 示例的响应类型） ---------- */
+  const successCode =
+    detail.responseCodes.find((item) => item.code === '200') ?? detail.responseCodes[0]
+
+  const responseRefs = new Set<string>()
+  if (successCode) for (const code of detail.responseCodes) collectRefs(code.parameters, responseRefs)
+
+  const responseInterface = `${pascal}Response`
+
+  const responseLines: string[] = []
+  // 响应直接沿用后端命名模型时直接用模型名，不再生成一份 XResponse 副本
+  const responseModel = responseModelType(successCode, models)
+  if (responseModel && successCode) responseRefs.add(successCode.refName)
+
+  for (const model of renderRefModels(responseRefs, models)) {
+    responseLines.push(model)
+    responseLines.push('')
+  }
+
+  if (successCode) {
+    if (responseModel) {
+      // 响应直接沿用后端命名模型：模型 interface 定义已由上方 renderRefModels 输出，
+      // 按需求不再输出 `export type XxxResponse = XxxVo` 这一层别名，只补空行分隔
+      responseLines.push('')
+    } else if (successCode.parameters.length > 0) {
+      responseLines.push(`/** ${detail.summary} 响应数据 */`)
+      responseLines.push(`export interface ${responseInterface} ${objectLiteral(successCode.parameters, 0, 'interface')}`)
+      responseLines.push('')
+    } else {
+      responseLines.push(`/** ${detail.summary} 响应数据 */`)
+      responseLines.push(`export type ${responseInterface} = any`)
+      responseLines.push('')
+    }
+  }
+
+  const responseCode = responseLines.join('\n').trimEnd()
+  if (responseCode) sections.push(responseCode)
+
+  return sections.join('\n')
+}
+
+/* ------------------------------------------------------------------ */
+/* Markdown 文档                                                       */
+/* ------------------------------------------------------------------ */
+
+/** 参数树展平后的一行 Markdown 表格行 */
+interface MarkdownParamRow {
+  name: string
+  in: ApiParam['in']
+  type: string
+  required: boolean
+  description: string
+}
+
+/** 把参数树展平为可写入 Markdown 表格的行，保留层级缩进（递归全部层级） */
+function flattenParams(params: ApiParam[]): MarkdownParamRow[] {
+  const rows: MarkdownParamRow[] = []
+  const walk = (list: ApiParam[], depth: number) => {
+    for (const param of list) {
+      rows.push({
+        name: `${'  '.repeat(depth)}${param.name}`,
+        in: param.in,
+        type: param.type,
+        required: param.required,
+        description: (param.description || '').replace(/\s+/g, ' ').trim()
+      })
+      if (param.children.length > 0) walk(param.children, depth + 1)
+    }
+  }
+  walk(params, 0)
+  return rows
+}
+
+/**
+ * 生成接口的 Markdown 文档文本：接口标题、入参（全层级含类型说明）、
+ * 请求示例、出参（全层级含类型说明）、响应示例。
+ * 供文档页「复制为 Markdown」按钮与侧边栏右键菜单共用。
+ */
+export function generateMarkdown(detail: ApiDetail): string {
+  const lines: string[] = []
+
+  lines.push(`## ${detail.summary}`)
+  lines.push('')
+  lines.push(`> ${detail.method} ${detail.fullPath}`)
+
+  if (detail.description && detail.description !== detail.summary) {
+    lines.push('')
+    lines.push(detail.description)
+  }
+
+  lines.push('')
+  lines.push('### 请求参数')
+  lines.push('')
+  const reqRows = flattenParams(detail.parameters)
+  if (reqRows.length > 0) {
+    lines.push('| 参数名 | 位置 | 类型 | 必填 | 描述 |')
+    lines.push('| --- | --- | --- | --- | --- |')
+    for (const row of reqRows) {
+      lines.push(`| ${row.name} | ${row.in} | ${row.type} | ${row.required ? '是' : '否'} | ${row.description || '—'} |`)
+    }
+  } else {
+    lines.push('该接口无请求参数')
+  }
+
+  lines.push('')
+  lines.push('### 请求示例')
+  lines.push('')
+  lines.push('```json')
+  lines.push(detail.requestExample || '{}')
+  lines.push('```')
+
+  lines.push('')
+  lines.push('### 响应参数')
+  lines.push('')
+  const successCode = detail.responseCodes.find((item) => item.code === '200') ?? detail.responseCodes[0]
+  if (successCode && successCode.parameters.length > 0) {
+    const respRows = flattenParams(successCode.parameters)
+    lines.push(`**状态码 ${successCode.code}**`)
+    lines.push('')
+    lines.push('| 参数名 | 类型 | 必填 | 描述 |')
+    lines.push('| --- | --- | --- | --- |')
+    for (const row of respRows) {
+      lines.push(`| ${row.name} | ${row.type} | ${row.required ? '是' : '否'} | ${row.description || '—'} |`)
+    }
+  } else {
+    lines.push('该接口未定义响应参数')
+  }
+
+  if (successCode && successCode.example) {
+    lines.push('')
+    lines.push('### 响应示例')
+    lines.push('')
+    lines.push('```json')
+    lines.push(successCode.example)
+    lines.push('```')
+  }
+
+  return lines.join('\n')
+}
+
+/* ------------------------------------------------------------------ */
 /* cURL / JSON 示例                                                     */
 /* ------------------------------------------------------------------ */
 

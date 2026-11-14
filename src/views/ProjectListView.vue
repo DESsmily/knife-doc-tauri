@@ -4,18 +4,15 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 
 import EmptyState from '@/components/common/EmptyState.vue'
-import TopNav from '@/components/common/TopNav.vue'
 import { copyText, probe } from '@/core/http'
 import type { DocProject } from '@/core/types'
 import { fromNow, normalizeBaseUrl } from '@/core/utils'
-import { useTheme } from '@/composables/useTheme'
 import { useAppStore } from '@/stores/app'
 import { useProjectStore, type ProjectInput } from '@/stores/project'
 
 const router = useRouter()
 const projectStore = useProjectStore()
 const appStore = useAppStore()
-const { isDark, toggleTheme } = useTheme()
 
 /* ------------------------------ 列表与搜索 ------------------------------ */
 
@@ -147,6 +144,39 @@ function openProject(project: DocProject) {
   void router.push({ name: 'doc', params: { projectId: project.id } })
 }
 
+/* ------------------------------ 拖拽排序 ------------------------------ */
+
+/** 正在拖拽的项目 id */
+const draggedId = ref('')
+/** 当前悬停（作为放置目标）的项目 id */
+const dragOverId = ref('')
+
+/** 搜索时禁用拖拽，避免在过滤列表上排序造成困惑 */
+const dragEnabled = computed(() => keyword.value.trim() === '')
+
+function onDragStart(project: DocProject) {
+  if (!dragEnabled.value) return
+  draggedId.value = project.id
+}
+
+function onDragEnd() {
+  draggedId.value = ''
+  dragOverId.value = ''
+}
+
+function onDragOver(project: DocProject, event: DragEvent) {
+  if (!draggedId.value || draggedId.value === project.id) return
+  event.preventDefault()
+  dragOverId.value = project.id
+}
+
+function onDrop(project: DocProject) {
+  if (!draggedId.value || draggedId.value === project.id) return
+  projectStore.moveProject(draggedId.value, project.id)
+  draggedId.value = ''
+  dragOverId.value = ''
+}
+
 /** 记录中的接口数量等信息 */
 function metaText(project: DocProject): string {
   const meta = project.meta
@@ -194,42 +224,24 @@ onMounted(() => {
 
 <template>
   <div class="project-page">
-    <header class="project-page__header">
-      <div class="project-page__brand">
-        <div class="brand-logo">KD</div>
-        <div class="brand-text">
-          <h1>Knife Doc</h1>
-          <p>Swagger / OpenAPI 接口文档聚合、调试与快捷请求</p>
-        </div>
-      </div>
+    <!-- 项目列表工具栏：搜索 + 新增 -->
+    <div class="project-page__toolbar">
+      <el-input
+        v-model="keyword"
+        class="search-input"
+        placeholder="搜索项目名称或地址"
+        clearable
+      >
+        <template #prefix>
+          <el-icon><Search /></el-icon>
+        </template>
+      </el-input>
 
-      <div class="project-page__actions">
-        <TopNav />
-
-        <el-input
-          v-model="keyword"
-          class="search-input"
-          placeholder="搜索项目名称或地址"
-          clearable
-          size="default"
-        >
-          <template #prefix>
-            <el-icon><Search /></el-icon>
-          </template>
-        </el-input>
-
-        <el-tooltip :content="isDark ? '切换到亮色' : '切换到暗色'" placement="bottom">
-          <el-button circle @click="toggleTheme">
-            <el-icon><component :is="isDark ? 'Sunny' : 'Moon'" /></el-icon>
-          </el-button>
-        </el-tooltip>
-
-        <el-button type="primary" @click="openCreate">
-          <el-icon><Plus /></el-icon>
-          <span>新增项目</span>
-        </el-button>
-      </div>
-    </header>
+      <el-button type="primary" @click="openCreate">
+        <el-icon><Plus /></el-icon>
+        <span>新增项目</span>
+      </el-button>
+    </div>
 
     <main class="project-page__body kd-scroll">
       <div class="project-page__summary">
@@ -267,8 +279,14 @@ onMounted(() => {
           v-for="project in filteredProjects"
           :key="project.id"
           class="project-card"
+          :class="{
+            'is-dragging': draggedId === project.id,
+            'is-drag-over': dragOverId === project.id && draggedId !== project.id
+          }"
           :style="{ '--card-color': project.color }"
           @click="openProject(project)"
+          @dragover="onDragOver(project, $event)"
+          @drop="onDrop(project)"
         >
           <div class="project-card__bar" />
 
@@ -280,6 +298,19 @@ onMounted(() => {
               <h3>{{ project.name }}</h3>
               <span class="project-card__time">最近访问：{{ fromNow(project.lastOpened) }}</span>
             </div>
+
+            <!-- 拖拽手柄：仅在非搜索状态下可拖动 -->
+            <span
+              v-if="dragEnabled"
+              class="project-card__drag"
+              title="拖动排序"
+              draggable="true"
+              @click.stop
+              @dragstart="onDragStart(project)"
+              @dragend="onDragEnd"
+            >
+              <el-icon><Rank /></el-icon>
+            </span>
 
             <span
               class="project-card__status"
@@ -403,56 +434,19 @@ onMounted(() => {
   background: var(--kd-bg);
 }
 
-.project-page__header {
+.project-page__toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 16px 28px;
+  gap: 12px;
+  padding: 12px 28px;
   border-bottom: 1px solid var(--kd-border);
   background: var(--kd-panel);
   flex-wrap: wrap;
 }
 
-.project-page__brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.brand-logo {
-  width: 40px;
-  height: 40px;
-  border-radius: $radius-md;
-  display: grid;
-  place-items: center;
-  background: linear-gradient(135deg, var(--kd-primary), #8a5cf6);
-  color: #fff;
-  font-weight: 800;
-  font-size: 15px;
-  letter-spacing: 0.5px;
-}
-
-.brand-text {
-  h1 {
-    font-size: $font-lg;
-    line-height: 1.3;
-  }
-
-  p {
-    font-size: $font-xs;
-    color: var(--kd-text-3);
-  }
-}
-
-.project-page__actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .search-input {
-  width: 240px;
+  width: 260px;
 }
 
 .project-page__body {
@@ -492,7 +486,7 @@ onMounted(() => {
   background: var(--kd-panel);
   cursor: pointer;
   overflow: hidden;
-  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
 
   &:hover {
     transform: translateY(-2px);
@@ -502,6 +496,41 @@ onMounted(() => {
     .project-card__bar {
       opacity: 1;
     }
+  }
+
+  &.is-dragging {
+    opacity: 0.4;
+    transform: scale(0.98);
+  }
+
+  &.is-drag-over {
+    border-color: var(--kd-primary);
+    border-style: dashed;
+    box-shadow: 0 0 0 2px var(--kd-primary-soft);
+  }
+}
+
+/* 拖拽手柄 */
+.project-card__drag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: $radius-sm;
+  color: var(--kd-text-3);
+  font-size: 16px;
+  cursor: grab;
+  flex-shrink: 0;
+  transition: color 0.14s ease, background 0.14s ease;
+
+  &:hover {
+    color: var(--kd-primary);
+    background: var(--kd-panel-3);
+  }
+
+  &:active {
+    cursor: grabbing;
   }
 }
 
@@ -655,8 +684,8 @@ onMounted(() => {
 }
 
 @include respond-to($bp-sm) {
-  .project-page__header {
-    padding: 14px 16px;
+  .project-page__toolbar {
+    padding: 12px 16px;
   }
 
   .project-page__body {
@@ -664,10 +693,6 @@ onMounted(() => {
   }
 
   .search-input {
-    width: 100%;
-  }
-
-  .project-page__actions {
     width: 100%;
   }
 }

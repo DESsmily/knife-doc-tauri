@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 
 import CodeBlock from '@/components/common/CodeBlock.vue'
 import TypeBadge from '@/components/common/TypeBadge.vue'
+import { headerSuggestions } from '@/core/headers'
 import {
   copyText,
   saveTextFile,
@@ -55,6 +56,9 @@ const ROW_TYPES: { value: string; label: string }[] = [
   { value: 'file', label: '文件' }
 ]
 
+/** Header 参数名自动补全数据源 */
+const headerNameSuggestions = headerSuggestions()
+
 /** 调试面板的 body 类型 -> http 层用于生成 cURL 的模式 */
 const CURL_BODY_MODE: Record<BodyType, NonNullable<DebugRequestOptions['bodyMode']>> = {
   none: 'none',
@@ -101,6 +105,8 @@ interface DebugState {
   rawBody: string
   timeout: number
   withCredentials: boolean
+  /** 可调的前缀地址，默认取项目 baseUrl，用户可手动修改 */
+  prefixUrl: string
 }
 
 /** 按接口缓存调试状态，切换接口回来后输入不丢失 */
@@ -205,7 +211,8 @@ function buildState(detail: ApiDetail, globals: GlobalParam[]): DebugState {
     bodyType: detail.requestMode,
     rawBody: detail.requestExample || '',
     timeout: appStore.settings.requestTimeout || 60000,
-    withCredentials: false
+    withCredentials: false,
+    prefixUrl: props.baseUrl || ''
   }
 }
 
@@ -226,6 +233,7 @@ function applyState(next: DebugState) {
   state.rawBody = next.rawBody
   state.timeout = next.timeout
   state.withCredentials = next.withCredentials
+  state.prefixUrl = next.prefixUrl
 }
 
 /**
@@ -294,7 +302,8 @@ watch(
       bodyType: state.bodyType,
       rawBody: state.rawBody,
       timeout: state.timeout,
-      withCredentials: state.withCredentials
+      withCredentials: state.withCredentials,
+      prefixUrl: state.prefixUrl
     })
   },
   { deep: true }
@@ -325,8 +334,22 @@ const queryString = computed(() =>
     .join('&')
 )
 
+/**
+ * 查询参数对象：所有已启用的查询参数（含非必填）都显式传入，
+ * 避免仅靠 URL 查询串时非必填参数被省略。同名键重复时以最后一条为准，
+ * 与 queryString 的拼接行为保持一致。
+ */
+const queryParams = computed<Record<string, string>>(() => {
+  const params: Record<string, string> = {}
+  for (const item of queryRows.value) {
+    if (!item.enabled || !item.name) continue
+    params[item.name] = item.value ?? ''
+  }
+  return params
+})
+
 const fullUrl = computed(() => {
-  const base = (props.baseUrl || '').replace(/\/+$/, '')
+  const base = (state.prefixUrl || '').replace(/\/+$/, '')
   const qs = queryString.value
   return `${base}${resolvedPath.value}${qs ? `?${qs}` : ''}`
 })
@@ -488,7 +511,7 @@ async function handleSend() {
       url: fullUrl.value,
       method: props.detail.method,
       headers,
-      params: {},
+      params: queryParams.value,
       data: payload.data,
       responseType: 'text',
       timeout: state.timeout,
@@ -532,12 +555,14 @@ function handleDownload() {
 /* ------------------------------------------------------------------ */
 
 function rowToKv(row: EditableRow): QuickKV {
+  const type: QuickKV['type'] = row.type === 'number' || row.type === 'boolean' || row.type === 'file' ? row.type : 'string'
   return {
     id: uid('kv'),
     name: row.name,
     value: row.value,
     enabled: row.enabled,
-    description: row.description
+    description: row.description,
+    type
   }
 }
 
@@ -565,7 +590,7 @@ function snapshotQuickRequest(): Partial<QuickRequest> {
   const headers = state.header.filter((row) => row.name).map(rowToKv)
   const accept = props.detail.produces[0]
   if (accept) {
-    headers.unshift({ id: uid('kv'), name: 'Accept', value: accept, enabled: true, description: '文档声明的响应类型' })
+    headers.unshift({ id: uid('kv'), name: 'Accept', value: accept, enabled: true, description: '文档声明的响应类型', type: 'string' })
   }
 
   return {
@@ -593,10 +618,6 @@ async function handleCopyUrl() {
 async function handleCopyBody() {
   const ok = await copyText(state.rawBody)
   ElMessage[ok ? 'success' : 'warning'](ok ? '请求体已复制' : '复制失败')
-}
-
-function selectUrl(event: MouseEvent) {
-  ;(event.target as HTMLInputElement).select()
 }
 
 /* ------------------------------------------------------------------ */
@@ -666,6 +687,15 @@ function changeRowType(row: EditableRow, value: string) {
 function rowTypeOptions(row: EditableRow) {
   if (row.loc === 'body' && state.bodyType !== 'form') return ROW_TYPES.filter((item) => item.value !== 'file')
   return ROW_TYPES
+}
+
+/** Header 参数名自动补全：按输入前缀过滤常用请求头 */
+function queryHeaderSuggestions(queryString: string, cb: (list: { value: string; label: string }[]) => void) {
+  const q = queryString.trim().toLowerCase()
+  const list = q
+    ? headerNameSuggestions.filter((item) => item.value.toLowerCase().includes(q))
+    : headerNameSuggestions
+  cb(list)
 }
 
 /* ------------------------------------------------------------------ */
@@ -745,14 +775,13 @@ watch(jsonPath, (path) => {
     <!-- 请求行：地址 + 发送 -->
     <div class="req-bar">
       <span class="req-bar__method" :class="`method-${detail.method.toLowerCase()}`">{{ detail.method }}</span>
-      <input
-        class="req-bar__url kd-mono"
-        :value="fullUrl"
-        readonly
+      <el-input
+        v-model="state.prefixUrl"
+        class="req-bar__prefix kd-mono"
+        placeholder="前缀地址，如 http://127.0.0.1:9999"
         spellcheck="false"
-        placeholder="请先在项目设置里填写后端地址"
-        @click="selectUrl"
       />
+      <span class="req-bar__path kd-mono">{{ resolvedPath }}{{ queryString ? `?${queryString}` : '' }}</span>
       <el-tooltip content="复制完整地址" placement="top">
         <el-button link class="req-bar__icon" @click="handleCopyUrl">
           <el-icon><CopyDocument /></el-icon>
@@ -826,7 +855,7 @@ watch(jsonPath, (path) => {
             </el-table-column>
             <el-table-column label="参数名" min-width="170">
               <template #default="{ row }">
-                <el-input v-if="row.editable" v-model="row.name" size="small" class="kd-mono" placeholder="参数名" />
+                <el-input v-if="row.editable" v-model="row.name" class="kd-mono" placeholder="参数名" />
                 <div v-else class="cell-name">
                   <span class="kd-mono">{{ row.name }}</span>
                   <em v-if="row.loc === 'path'" class="cell-name__mark" title="路径参数">{ }</em>
@@ -839,14 +868,13 @@ watch(jsonPath, (path) => {
                 <el-select
                   v-if="row.enumValues && row.enumValues.length"
                   v-model="row.value"
-                  size="small"
                   clearable
                   placeholder="请选择"
                   class="full-width"
                 >
                   <el-option v-for="(value, index) in row.enumValues" :key="index" :label="String(value)" :value="String(value)" />
                 </el-select>
-                <el-input v-else v-model="row.value" size="small" class="kd-mono" placeholder="参数值" />
+                <el-input v-else v-model="row.value" class="kd-mono" placeholder="参数值" />
               </template>
             </el-table-column>
             <el-table-column label="类型" width="110">
@@ -854,7 +882,6 @@ watch(jsonPath, (path) => {
                 <el-select
                   v-if="row.editable"
                   :model-value="row.type"
-                  size="small"
                   @update:model-value="(value: string) => changeRowType(row, value)"
                 >
                   <el-option v-for="item in rowTypeOptions(row)" :key="item.value" :label="item.label" :value="item.value" />
@@ -918,7 +945,7 @@ watch(jsonPath, (path) => {
               </el-table-column>
               <el-table-column label="字段名" min-width="170">
                 <template #default="{ row }">
-                  <el-input v-if="row.editable" v-model="row.name" size="small" class="kd-mono" placeholder="字段名" />
+                  <el-input v-if="row.editable" v-model="row.name" class="kd-mono" placeholder="字段名" />
                   <div v-else class="cell-name">
                     <span class="kd-mono">{{ row.name }}</span>
                     <i v-if="row.required" class="cell-name__star">*</i>
@@ -950,7 +977,7 @@ watch(jsonPath, (path) => {
                       <el-icon><Close /></el-icon>
                     </el-button>
                   </div>
-                  <el-input v-else v-model="row.value" size="small" class="kd-mono" placeholder="参数值" />
+                  <el-input v-else v-model="row.value" class="kd-mono" placeholder="参数值" />
                 </template>
               </el-table-column>
               <el-table-column label="类型" width="110">
@@ -958,7 +985,6 @@ watch(jsonPath, (path) => {
                   <el-select
                     v-if="row.editable"
                     :model-value="row.type"
-                    size="small"
                     @update:model-value="(value: string) => changeRowType(row, value)"
                   >
                     <el-option v-for="item in rowTypeOptions(row)" :key="item.value" :label="item.label" :value="item.value" />
@@ -1026,7 +1052,14 @@ watch(jsonPath, (path) => {
             </el-table-column>
             <el-table-column label="参数名" min-width="180">
               <template #default="{ row }">
-                <el-input v-if="row.editable" v-model="row.name" size="small" class="kd-mono" placeholder="参数名" />
+                <el-autocomplete
+                  v-if="row.editable"
+                  v-model="row.name"
+                  :fetch-suggestions="queryHeaderSuggestions"
+                  class="kd-mono"
+                  placeholder="参数名"
+                  value-key="value"
+                />
                 <div v-else class="cell-name">
                   <span class="kd-mono">{{ row.name }}</span>
                   <i v-if="row.required" class="cell-name__star">*</i>
@@ -1037,7 +1070,6 @@ watch(jsonPath, (path) => {
               <template #default="{ row }">
                 <el-input
                   v-model="row.value"
-                  size="small"
                   class="kd-mono"
                   placeholder="参数值"
                   :type="/token|authorization|secret|password/i.test(row.name) ? 'password' : 'text'"
@@ -1258,19 +1290,18 @@ watch(jsonPath, (path) => {
   }
 }
 
-.req-bar__url {
+.req-bar__prefix {
+  flex-shrink: 0;
+  width: 240px;
+}
+
+.req-bar__path {
   flex: 1;
   min-width: 0;
-  border: 0;
-  outline: none;
-  background: transparent;
   font-size: $font-sm;
   color: var(--kd-text);
-  cursor: text;
-
-  &::placeholder {
-    color: var(--kd-text-3);
-  }
+  @include ellipsis(1);
+  padding: 0 2px;
 }
 
 .req-bar__icon {

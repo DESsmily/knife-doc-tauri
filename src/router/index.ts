@@ -4,13 +4,13 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     name: 'projects',
-    component: () => import('@/views/ProjectListView.vue'),
+    component: () => import('@/views/HomeView.vue'),
     meta: { title: '项目管理' }
   },
   {
     path: '/quick',
     name: 'quick',
-    component: () => import('@/views/QuickRequestView.vue'),
+    component: () => import('@/views/HomeView.vue'),
     meta: { title: '快捷请求' }
   },
   {
@@ -42,7 +42,7 @@ const router = createRouter({
 
 router.afterEach((to) => {
   const title = (to.meta?.title as string | undefined) ?? '接口文档'
-  document.title = `${title} · Knife Doc`
+  document.title = `${title} · Knife Doc Tool`
 })
 
 export default router

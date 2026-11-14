@@ -1,17 +1,31 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 
 import MethodTag from '@/components/common/MethodTag.vue'
+import { apiDetailToQuickRequest } from '@/core/apiToQuick'
+import { copyText } from '@/core/http'
+import { generateMarkdown, generateTypeTypes, type ScriptContext } from '@/core/scriptGenerator'
 import type { ApiSummary, DocGroup } from '@/core/types'
 import { useDocStore } from '@/stores/doc'
 import { useGlobalParamStore } from '@/stores/globalParam'
+import { useProjectStore } from '@/stores/project'
+import { useQuickRequestStore } from '@/stores/quickRequest'
 
 const emit = defineEmits<{
   (e: 'open-global'): void
+  (e: 'toggle-collapse'): void
+}>()
+
+const props = defineProps<{
+  /** 是否折叠侧边栏（仅保留窄条与展开按钮） */
+  collapsed: boolean
 }>()
 
 const docStore = useDocStore()
 const globalParamStore = useGlobalParamStore()
+const projectStore = useProjectStore()
+const quickStore = useQuickRequestStore()
 
 /* ------------------------------ 分组切换 -------------------------------- */
 
@@ -60,33 +74,34 @@ const matchCount = computed(() => filteredTags.value.reduce((sum, tag) => sum + 
  * 模块展开状态：未记录的模块一律视为收缩，只有显式写入 `false` 才表示展开，
  * 因此默认就是「全部收缩」。各模块状态互相独立，可同时展开多个，
  * 不使用手风琴式的互斥展开。
+ * （注意：变量名用 tagCollapsed，避免与外部传入的 collapsed prop 同名冲突）
  */
-const collapsed = reactive<Record<string, boolean>>({})
+const tagCollapsed = reactive<Record<string, boolean>>({})
 
 function isCollapsed(name: string): boolean {
-  return collapsed[name] !== false
+  return tagCollapsed[name] !== false
 }
 
 function toggleTag(name: string) {
-  collapsed[name] = !isCollapsed(name)
+  tagCollapsed[name] = !isCollapsed(name)
 }
 
 function expandTag(name: string) {
-  collapsed[name] = false
+  tagCollapsed[name] = false
 }
 
 /** 切换分组后回到默认收缩状态 */
 watch(
   () => docStore.currentGroupId,
   () => {
-    for (const key of Object.keys(collapsed)) delete collapsed[key]
+    for (const key of Object.keys(tagCollapsed)) delete tagCollapsed[key]
   }
 )
 
 /** 有搜索词时自动展开全部，清空搜索后回到默认收缩 */
 watch(keyword, (value) => {
   const expand = value.trim().length > 0
-  for (const tag of docStore.tagGroups) collapsed[tag.name] = !expand
+  for (const tag of docStore.tagGroups) tagCollapsed[tag.name] = !expand
 })
 
 /* ------------------------------ 列表定位 -------------------------------- */
@@ -140,12 +155,135 @@ function selectPanel(panel: 'info' | 'models') {
   docStore.setPanel(panel)
 }
 
+/* ------------------------------ 右键自定义菜单 --------------------------- */
+
+interface MenuState {
+  visible: boolean
+  x: number
+  y: number
+  api: ApiSummary | null
+}
+
+const menuState = reactive<MenuState>({
+  visible: false,
+  x: 0,
+  y: 0,
+  api: null
+})
+
+/** 打开右键菜单 */
+function openContextMenu(event: MouseEvent, api: ApiSummary) {
+  event.preventDefault()
+  event.stopPropagation()
+  menuState.visible = true
+  menuState.x = event.clientX
+  menuState.y = event.clientY
+  menuState.api = api
+}
+
+/** 关闭右键菜单 */
+function closeContextMenu() {
+  menuState.visible = false
+  menuState.api = null
+}
+
+/** 复制接口路径 */
+async function copyPathFromMenu() {
+  const api = menuState.api
+  if (!api) return
+  const ok = await copyText(api.fullPath)
+  ElMessage[ok ? 'success' : 'warning'](ok ? '接口路径已复制' : '复制失败')
+  closeContextMenu()
+}
+
+/** 复制接口的 Markdown 文档（入参、请求示例、出参、响应示例） */
+async function copyMarkdownFromMenu() {
+  const api = menuState.api
+  if (!api) return
+  const detail = docStore.parser?.getDetail(api.id) ?? null
+  if (!detail) {
+    ElMessage.warning('未获取到接口详情，无法生成 Markdown')
+    closeContextMenu()
+    return
+  }
+  const ok = await copyText(generateMarkdown(detail))
+  ElMessage[ok ? 'success' : 'warning'](ok ? 'Markdown 已复制' : '复制失败')
+  closeContextMenu()
+}
+
+/** 复制 TS 示例类型（接口名称 + 入参类型 + 出参类型） */
+async function copyTsExample() {
+  const api = menuState.api
+  if (!api) return
+  const detail = docStore.parser?.getDetail(api.id) ?? null
+  if (!detail) {
+    ElMessage.warning('未获取到接口详情，无法生成 TS 示例')
+    closeContextMenu()
+    return
+  }
+  const ctx: ScriptContext = {
+    detail,
+    baseUrl: '',
+    models: docStore.models
+  }
+  const text = generateTypeTypes(ctx)
+  const ok = await copyText(text)
+  ElMessage[ok ? 'success' : 'warning'](ok ? 'TS 示例已复制' : '复制失败')
+  closeContextMenu()
+}
+
+/** 把当前接口（含入参）添加到快捷请求 */
+function addToQuickRequest() {
+  const api = menuState.api
+  if (!api) return
+  const detail = docStore.parser?.getDetail(api.id) ?? null
+  if (!detail) {
+    ElMessage.warning('未获取到接口详情，无法添加到快捷请求')
+    closeContextMenu()
+    return
+  }
+  const baseUrl = projectStore.baseUrl
+  const globalParams = globalParamStore.enabled
+  const snapshot = apiDetailToQuickRequest(detail, baseUrl, globalParams)
+  const request = quickStore.addRequest(snapshot)
+  ElMessage.success(`已添加快捷请求「${request.name}」`)
+  closeContextMenu()
+}
+
+// 点击空白或滚动时关闭菜单
+function handleMenuClickOutside() {
+  if (menuState.visible) closeContextMenu()
+}
+
+function handleListScroll() {
+  if (menuState.visible) closeContextMenu()
+}
+
+onMounted(() => {
+  window.addEventListener('click', handleMenuClickOutside)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', handleMenuClickOutside)
+})
+
 const enabledGlobalCount = computed(() => globalParamStore.enabledCount)
 const totalGlobalCount = computed(() => globalParamStore.list.length)
 </script>
 
 <template>
-  <aside class="doc-sidebar">
+  <aside class="doc-sidebar" :class="{ 'is-collapsed': collapsed }">
+    <!-- 折叠态：竖向展开按钮 -->
+    <button
+      v-if="collapsed"
+      type="button"
+      class="collapse-toggle"
+      title="展开侧边栏"
+      @click="emit('toggle-collapse')"
+    >
+      <el-icon><Expand /></el-icon>
+    </button>
+
     <!-- 分组选择 -->
     <div class="doc-sidebar__group">
       <el-select
@@ -203,7 +341,7 @@ const totalGlobalCount = computed(() => globalParamStore.list.length)
     </div>
 
     <!-- 接口列表（搜索框已移动到页面顶栏） -->
-    <div ref="listRef" class="doc-sidebar__list kd-scroll">
+    <div ref="listRef" class="doc-sidebar__list kd-scroll" @scroll="handleListScroll">
       <div v-if="docStore.parsing" class="list-loading">
         <el-skeleton :rows="6" animated />
       </div>
@@ -224,16 +362,17 @@ const totalGlobalCount = computed(() => globalParamStore.list.length)
           </button>
 
           <div v-show="!isCollapsed(tag.name)" class="tag-apis">
-            <button
-              v-for="api in tag.apis"
-              :key="api.id"
-              type="button"
-              class="api-item"
-              :class="{ 'is-active': isActive(api), 'is-deprecated': api.deprecated }"
-              :data-reveal="`api:${api.id}`"
-              :title="`${api.method} ${api.fullPath}`"
-              @click="selectApi(api)"
-            >
+              <button
+                v-for="api in tag.apis"
+                :key="api.id"
+                type="button"
+                class="api-item"
+                :class="{ 'is-active': isActive(api), 'is-deprecated': api.deprecated }"
+                :data-reveal="`api:${api.id}`"
+                :title="`${api.method} ${api.fullPath}`"
+                @click="selectApi(api)"
+                @contextmenu="openContextMenu($event, api)"
+              >
               <MethodTag :method="api.method" size="small" />
               <span class="api-item__name">{{ api.summary }}</span>
             </button>
@@ -250,6 +389,34 @@ const totalGlobalCount = computed(() => globalParamStore.list.length)
         <p>当前分组暂无接口</p>
       </div>
     </div>
+
+    <!-- 右键自定义菜单 -->
+    <teleport to="body">
+      <div
+        v-if="menuState.visible"
+        class="ctx-menu"
+        :style="{ left: `${menuState.x}px`, top: `${menuState.y}px` }"
+        @click.stop
+        @contextmenu.prevent
+      >
+        <button type="button" class="ctx-menu__item" @click="copyPathFromMenu">
+          <el-icon><CopyDocument /></el-icon>
+          <span>复制路径</span>
+        </button>
+        <button type="button" class="ctx-menu__item" @click="copyMarkdownFromMenu">
+          <el-icon><Tickets /></el-icon>
+          <span>复制为 Markdown</span>
+        </button>
+        <button type="button" class="ctx-menu__item" @click="copyTsExample">
+          <el-icon><DocumentCopy /></el-icon>
+          <span>复制 TS 示例</span>
+        </button>
+        <button type="button" class="ctx-menu__item" @click="addToQuickRequest">
+          <el-icon><Plus /></el-icon>
+          <span>添加到快捷请求</span>
+        </button>
+      </div>
+    </teleport>
 
     <!-- 底部统计 -->
     <div class="doc-sidebar__footer">
@@ -274,6 +441,37 @@ const totalGlobalCount = computed(() => globalParamStore.list.length)
   min-height: 0;
   background: var(--kd-panel);
   border-right: 1px solid var(--kd-border);
+  transition: width 0.22s ease;
+
+  &.is-collapsed {
+    width: 44px;
+
+    .doc-sidebar__group,
+    .doc-sidebar__fixed,
+    .doc-sidebar__list,
+    .doc-sidebar__footer {
+      display: none;
+    }
+  }
+}
+
+.collapse-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--kd-text-3);
+  font-size: 18px;
+  cursor: pointer;
+  transition: color 0.14s ease, background 0.14s ease;
+
+  &:hover {
+    color: var(--kd-primary);
+    background: var(--kd-panel-2);
+  }
 }
 
 .doc-sidebar__group {
@@ -490,6 +688,39 @@ const totalGlobalCount = computed(() => globalParamStore.list.length)
 
 .dot-sep {
   opacity: 0.6;
+}
+
+/* ------------------------------ 右键菜单 -------------------------------- */
+.ctx-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 168px;
+  padding: 4px;
+  border-radius: $radius-md;
+  border: 1px solid var(--kd-border-strong);
+  background: var(--kd-panel);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16);
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: $radius-sm;
+    background: transparent;
+    color: var(--kd-text-2);
+    font-size: $font-sm;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.14s ease, color 0.14s ease;
+
+    &:hover {
+      background: var(--kd-primary-soft);
+      color: var(--kd-primary);
+    }
+  }
 }
 
 @include respond-to($bp-md) {

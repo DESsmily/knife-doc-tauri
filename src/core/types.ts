@@ -268,13 +268,15 @@ export type QuickBodyMode = 'none' | 'json' | 'form' | 'urlencoded' | 'raw'
 /** 鉴权方式 */
 export type QuickAuthType = 'none' | 'bearer' | 'basic' | 'apikey'
 
-/** query / header 的一行键值 */
+/** query / header / 表单字段的一行键值 */
 export interface QuickKV {
   id: string
   name: string
   value: string
   enabled: boolean
   description: string
+  /** 字段类型：string / number / boolean / file，决定发送时如何序列化值 */
+  type: 'string' | 'number' | 'boolean' | 'file'
 }
 
 /** 鉴权配置，发送时转换成 header 或 query */

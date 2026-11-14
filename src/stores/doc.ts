@@ -150,7 +150,6 @@ export const useDocStore = defineStore('doc', {
       const projectStore = useProjectStore()
       const isSameProject = this.projectId === project.id
       if (isSameProject && this.groups.length > 0 && !options.force) {
-        projectStore.touch(project.id)
         return
       }
 

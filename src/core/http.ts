@@ -187,8 +187,9 @@ function buildCurl(options: DebugRequestOptions, finalUrl: string): string {
     parts.push(`  -H '${key}: ${value}'`)
   }
   const url = new URL(finalUrl)
+  // 非必填参数即使值为空也要保留（不能省略），仅跳过 undefined
   for (const [key, value] of Object.entries(options.params)) {
-    if (value === '' || value === undefined) continue
+    if (value === undefined) continue
     url.searchParams.set(key, value)
   }
   const bodyMode = options.bodyMode ?? 'none'

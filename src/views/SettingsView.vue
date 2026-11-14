@@ -4,15 +4,16 @@
  */
 
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-import TopNav from '@/components/common/TopNav.vue'
 import { formatBytes } from '@/core/utils'
 import { useAppStore } from '@/stores/app'
 import { useTheme } from '@/composables/useTheme'
 import type { CloseBehavior, DirTarget, ThemeModeSetting } from '@/core/tauri'
 
 const appStore = useAppStore()
+const router = useRouter()
 const { setTheme } = useTheme()
 
 const busy = ref('')
@@ -20,6 +21,10 @@ const busy = ref('')
 onMounted(() => {
   void appStore.refreshUsage()
 })
+
+function backToHome() {
+  void router.push({ name: 'projects' })
+}
 
 const CLOSE_OPTIONS: { value: CloseBehavior; label: string; hint: string }[] = [
   { value: 'minimizeToTray', label: '最小化到托盘', hint: '窗口隐藏，进程常驻，点托盘图标可立即恢复现场' },
@@ -101,15 +106,16 @@ async function clear(target: 'cache' | 'temp') {
 <template>
   <div class="setting-page">
     <header class="setting-page__header">
+      <el-button link class="setting-page__back" @click="backToHome">
+        <el-icon><ArrowLeft /></el-icon>
+        <span>返回</span>
+      </el-button>
+
       <div class="setting-page__brand">
-        <div class="brand-logo">KD</div>
         <div class="brand-text">
           <h1>设置</h1>
           <p>客户端行为、外观与本地数据</p>
         </div>
-      </div>
-      <div class="setting-page__actions">
-        <TopNav />
       </div>
     </header>
 
@@ -137,7 +143,7 @@ async function clear(target: 'cache' | 'temp') {
           </el-radio-group>
         </div>
         <p class="card__foot">
-          选择「最小化到托盘」后，可从屏幕右下角的 Knife Doc 图标恢复窗口；右键图标选择「退出」才会真正结束进程。
+          选择「最小化到托盘」后，可从屏幕右下角的 Knife Doc Tool 图标恢复窗口；右键图标选择「退出」才会真正结束进程。
         </p>
       </section>
 
@@ -236,7 +242,7 @@ async function clear(target: 'cache' | 'temp') {
         <div class="about">
           <div class="about__item">
             <span>名称</span>
-            <strong>{{ appStore.info?.productName ?? 'Knife Doc' }}</strong>
+            <strong>{{ appStore.info?.productName ?? 'Knife Doc Tool' }}</strong>
           </div>
           <div class="about__item">
             <span>版本</span>
@@ -260,13 +266,13 @@ async function clear(target: 'cache' | 'temp') {
 .setting-page {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   background: var(--kd-bg);
 
   &__header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 16px;
     height: $header-height;
     padding: 0 20px;
     background: var(--kd-panel);
@@ -279,10 +285,8 @@ async function clear(target: 'cache' | 'temp') {
     align-items: center;
   }
 
-  &__actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
+  &__back {
+    flex-shrink: 0;
   }
 
   &__body {

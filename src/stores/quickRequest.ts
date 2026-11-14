@@ -39,7 +39,19 @@ export function emptyBody(): QuickBody {
 }
 
 export function kv(name = '', value = '', description = ''): QuickKV {
-  return { id: uid('kv'), name, value, enabled: true, description }
+  return { id: uid('kv'), name, value, enabled: true, description, type: 'string' }
+}
+
+/** 把一行旧版 KV（缺少 type 字段）补全为规范结构 */
+function normalizeKv(raw: Partial<QuickKV> | undefined): QuickKV {
+  return {
+    id: raw?.id ?? uid('kv'),
+    name: raw?.name ?? '',
+    value: raw?.value ?? '',
+    enabled: raw?.enabled ?? true,
+    description: raw?.description ?? '',
+    type: raw?.type ?? 'string'
+  }
 }
 
 /** 新建一条空白请求；folderId 为空表示挂在未分类下 */
@@ -68,12 +80,14 @@ function normalizeRequest(raw: unknown): QuickRequest | null {
   if (!raw || typeof raw !== 'object') return null
   const item = raw as Partial<QuickRequest>
   if (!item.id || typeof item.url !== 'string') return null
+  const normFields = (arr: unknown): QuickKV[] =>
+    Array.isArray(arr) ? arr.map((it) => normalizeKv(it as Partial<QuickKV>)) : []
   return {
     ...createRequest(),
     ...item,
-    params: Array.isArray(item.params) ? item.params : [],
-    headers: Array.isArray(item.headers) ? item.headers : [],
-    body: { ...emptyBody(), ...(item.body ?? {}) },
+    params: normFields(item.params),
+    headers: normFields(item.headers),
+    body: { ...emptyBody(), ...(item.body ?? {}), fields: normFields(item.body?.fields) },
     auth: { ...emptyAuth(), ...(item.auth ?? {}) }
   }
 }

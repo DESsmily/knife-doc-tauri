@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Knife Doc",
+  "productName": "Knife Doc Tool",
   "version": "1.0.0",
   "identifier": "com.knifedoc.desktop",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Knife Doc · 接口文档",
+        "title": "Knife Doc Tool · 接口文档",
         "width": 1440,
         "height": 900,
         "minWidth": 1080,
@@ -21,7 +21,8 @@
         "center": true,
         "resizable": true,
         "fullscreen": false,
-        "visible": true
+        "visible": true,
+        "decorations": false
       }
     ],
     "security": {

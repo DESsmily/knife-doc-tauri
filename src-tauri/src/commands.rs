@@ -19,7 +19,7 @@ fn path_string(path: &PathBuf) -> String {
 pub fn get_app_info(state: State<AppState>) -> Value {
     let settings = state.settings.snapshot();
     json!({
-        "productName": "Knife Doc",
+        "productName": "Knife Doc Tool",
         "version": env!("CARGO_PKG_VERSION"),
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,

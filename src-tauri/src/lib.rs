@@ -9,6 +9,8 @@ use tauri::{Manager, WindowEvent};
 use crate::data_layout::DataLayout;
 use crate::settings::{CloseBehavior, SettingsStore};
 
+use tauri::menu::{MenuBuilder, PredefinedMenuItem};
+
 pub struct AppState {
     pub layout: DataLayout,
     pub settings: SettingsStore,
@@ -31,6 +33,19 @@ pub fn run() {
             let layout = data_layout::resolve(&handle);
             let settings = SettingsStore::load(&layout.settings_file);
             app.manage(AppState { layout, settings });
+
+            let menu = MenuBuilder::new(app)
+                .copy()
+                .separator()
+                .undo()
+                .redo()
+                .cut()
+                .paste()
+                .select_all()
+                .item(&PredefinedMenuItem::copy(app, Some("custom text"))?)
+                .build()?;
+            app.set_menu(menu)?;
+
             tray::build(&handle)?;
             Ok(())
         })
@@ -68,5 +83,5 @@ pub fn run() {
             commands::open_dir
         ])
         .run(tauri::generate_context!())
-        .expect("Knife Doc 启动失败");
+        .expect("Knife Doc Tool 启动失败");
 }

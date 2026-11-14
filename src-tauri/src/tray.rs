@@ -2,7 +2,7 @@
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{include_image, AppHandle, Manager};
+use tauri::{include_image, AppHandle, Emitter, Manager};
 
 pub fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -31,21 +31,27 @@ pub fn toggle_main(app: &AppHandle) {
 
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "退出 Knife Doc", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&show, &separator, &quit])?;
+    let quit = MenuItem::with_id(app, "quit", "退出 Knife Doc Tool", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &settings, &separator, &quit])?;
 
     let icon = include_image!("icons/32x32.png");
 
     TrayIconBuilder::with_id("knife-doc-tray")
         .icon(icon)
-        .tooltip("Knife Doc · 接口文档")
+        .tooltip("Knife Doc Tool · 接口文档")
         .menu(&menu)
         // 左键用于恢复窗口，菜单只在右键时出现
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "quit" => app.exit(0),
             "show" => show_main(app),
+            // 设置：先恢复窗口，再向前端发射事件，由前端导航到设置页
+            "settings" => {
+                show_main(app);
+                let _ = app.emit("navigate-settings", ());
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

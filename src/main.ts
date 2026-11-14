@@ -31,6 +31,14 @@ for (const [name, component] of Object.entries(ElementPlusIcons)) {
 }
 
 /**
+ * 禁用浏览器 / WebView 的默认右键菜单。
+ *
+ * 本应用为桌面端工具，右键菜单由业务侧自行实现（如侧边栏接口项的自定义菜单），
+ * 不需要浏览器原生的「检查 / 复制 / 粘贴」等上下文菜单。阻止默认行为即可。
+ */
+window.addEventListener('contextmenu', (event) => event.preventDefault())
+
+/**
  * 请求接管与数据加载都要在挂载前完成：
  * CORSFetch.init() 把 window.fetch / XMLHttpRequest 换成由 Rust 发出的实现（原生实现
  * 保留在 window.fetchNative），这样文档探测与调试请求都不受同源策略限制；
