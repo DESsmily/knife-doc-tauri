@@ -8,6 +8,12 @@
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 
+import {
+  readDiscovery,
+  readGroupDoc,
+  saveDiscovery,
+  saveGroupDoc
+} from '@/core/docCache'
 import { discover, loadGroupDocument } from '@/core/discover'
 import { DocumentParser } from '@/core/parser'
 import type { ApiDetail, ApiSummary, ApiTagGroup, DocGroup, DocProject, SchemaModel } from '@/core/types'
@@ -170,6 +176,8 @@ export const useDocStore = defineStore('doc', {
 
       try {
         const result = await discover(project.baseUrl)
+        // 成功探测：覆盖更新本地缓存的入口快照
+        saveDiscovery(project.id, result)
         this.groups = result.groups
         this.logs = result.logs
         this.syncedAt = Date.now()
@@ -183,6 +191,23 @@ export const useDocStore = defineStore('doc', {
           await this.selectGroup(result.groups[0].id)
         }
       } catch (error) {
+        // 探测失败：回读本地缓存的入口快照，用缓存的分组列表继续打开文档
+        const cached = readDiscovery(project.id)
+        if (cached) {
+          this.groups = cached.result.groups
+          this.logs = [...cached.result.logs, '入口探测失败，已回退到本地缓存的分组列表']
+          this.syncedAt = cached.savedAt
+
+          projectStore.updateMeta(project.id, {
+            groupCount: cached.result.groups.length,
+            specVersion: cached.result.groups[0]?.swaggerVersion
+          })
+
+          if (cached.result.groups.length > 0) {
+            await this.selectGroup(cached.result.groups[0].id)
+          }
+          return
+        }
         this.error = error instanceof Error ? error.message : String(error)
         throw error
       } finally {
@@ -211,7 +236,9 @@ export const useDocStore = defineStore('doc', {
       this.parsing = true
       this.error = ''
       try {
-        const { doc } = await loadGroupDocument(group)
+        const { doc, finalUrl } = await loadGroupDocument(group)
+        // 成功拉取：覆盖更新本地缓存的分组文档快照
+        saveGroupDoc(this.projectId, groupId, doc, finalUrl)
         const parser = new DocumentParser(doc, { groupId: group.id, sourceUrl: group.url })
         parserCache.set(key, markRaw(parser))
 
@@ -238,6 +265,37 @@ export const useDocStore = defineStore('doc', {
 
         this.selectFirstApi()
       } catch (error) {
+        // 拉取失败：回读本地缓存的分组文档快照，用缓存文档继续解析
+        const cached = readGroupDoc(this.projectId, groupId)
+        if (cached) {
+          const parser = new DocumentParser(cached.doc, { groupId: group.id, sourceUrl: group.url })
+          parserCache.set(key, markRaw(parser))
+
+          group.loaded = true
+          group.error = null
+          group.specKind = parser.specKind
+          group.title = parser.info.title
+          group.apiVersion = parser.info.version
+          group.description = parser.info.description
+          group.host = parser.info.host
+          group.basePath = parser.info.basePath
+          group.apiCount = parser.apiCount
+
+          this.syncedAt = cached.savedAt
+          this.revision++
+          this.logs.push(`分组「${group.name}」文档拉取失败，已回退到本地缓存的文档数据`)
+
+          const projectStore = useProjectStore()
+          const total = this.groups.reduce((sum, item) => sum + (item.apiCount || 0), 0)
+          projectStore.updateMeta(this.projectId, {
+            title: parser.info.title,
+            apiCount: total,
+            specVersion: group.swaggerVersion
+          })
+
+          this.selectFirstApi()
+          return
+        }
         group.error = error instanceof Error ? error.message : String(error)
         group.loaded = false
         this.error = group.error

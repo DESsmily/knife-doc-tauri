@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // 数据与设置已在 main.ts 挂载前加载完成，这里只负责渲染路由。
-// WindowBar 为全局窗口工具栏，固定在所有页面顶部，提供应用标识与窗口栏。
+// WindowBar 为全局窗口工具栏（同时承载应用级导航），StatusBar 为全局底部状态栏，
+// 二者固定在所有页面上下两端，页面只负责自身内容。
 import { onBeforeUnmount, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 import WindowBar from '@/components/common/WindowBar.vue'
+import StatusBar from '@/components/common/StatusBar.vue'
 import PageSearchBox from '@/components/common/PageSearchBox.vue'
 import UpdateDialog from '@/components/common/UpdateDialog.vue'
 import { onAppEvent } from '@/core/tauri'
@@ -43,6 +45,9 @@ onBeforeUnmount(() => {
         </transition>
       </router-view>
     </div>
+
+    <!-- 全局底部状态栏：运行状态摘要 -->
+    <StatusBar />
 
     <!-- 全局更新弹框：启动自动检查与设置页手动检查共用 -->
     <UpdateDialog />

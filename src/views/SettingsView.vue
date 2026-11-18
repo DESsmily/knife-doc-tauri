@@ -4,7 +4,6 @@
  */
 
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { message } from '@/core/message'
 
@@ -16,7 +15,6 @@ import { isTauri } from '@/core/tauri'
 import type { CloseBehavior, DirTarget, ThemeModeSetting } from '@/core/tauri'
 
 const appStore = useAppStore()
-const router = useRouter()
 const { setTheme } = useTheme()
 
 const busy = ref('')
@@ -42,10 +40,6 @@ async function handleCheckUpdate() {
 onMounted(() => {
   void appStore.refreshUsage()
 })
-
-function backToHome() {
-  void router.push({ name: 'projects' })
-}
 
 const CLOSE_OPTIONS: { value: CloseBehavior; label: string; hint: string }[] = [
   { value: 'minimizeToTray', label: '最小化到托盘', hint: '窗口隐藏，进程常驻，点托盘图标可立即恢复现场' },
@@ -127,16 +121,9 @@ async function clear(target: 'cache' | 'temp') {
 <template>
   <div class="setting-page">
     <header class="setting-page__header">
-      <el-button link class="setting-page__back" @click="backToHome">
-        <el-icon><ArrowLeft /></el-icon>
-        <span>返回</span>
-      </el-button>
-
-      <div class="setting-page__brand">
-        <div class="brand-text">
-          <h1>设置</h1>
-          <p>客户端行为、外观与本地数据</p>
-        </div>
+      <div class="setting-page__titles">
+        <h1>设置</h1>
+        <p>客户端行为、外观与本地数据</p>
       </div>
     </header>
 
@@ -316,51 +303,28 @@ async function clear(target: 'cache' | 'temp') {
     display: flex;
     align-items: center;
     gap: 16px;
-    height: $header-height;
-    padding: 0 20px;
-    background: var(--kd-panel);
-    border-bottom: 1px solid var(--kd-border);
-  }
-
-  &__brand {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-  }
-
-  &__back {
+    padding: 16px 20px 12px;
     flex-shrink: 0;
+  }
+
+  &__titles {
+    min-width: 0;
+
+    h1 {
+      font-size: $font-lg;
+    }
+
+    p {
+      margin-top: 2px;
+      font-size: $font-xs;
+      color: var(--kd-text-3);
+    }
   }
 
   &__body {
     flex: 1;
     min-height: 0;
-    padding: 18px 20px 40px;
-  }
-}
-
-.brand-logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  font-weight: 700;
-  color: #fff;
-  background: linear-gradient(135deg, var(--kd-primary), #2f3aa8);
-  border-radius: 9px;
-}
-
-.brand-text {
-  h1 {
-    margin: 0;
-    font-size: $font-lg;
-  }
-
-  p {
-    margin: 0;
-    font-size: $font-xs;
-    color: var(--kd-text-3);
+    padding: 0 20px 40px;
   }
 }
 

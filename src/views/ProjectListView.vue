@@ -1,5 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+/**
+ * 项目管理主页
+ *
+ * 页面结构（自上而下）：
+ *  - 工具栏：搜索框（Ctrl/⌘ + K 聚焦）、网格 / 列表视图切换、新增项目；
+ *  - 概览条：激活服务数量、离线运行说明；
+ *  - 服务列表：网格卡片视图与紧凑列表视图，末尾固定一张「接入新微服务文档」占位卡。
+ *
+ * 排序交互沿用 Pointer Events 方案（Tauri 的 WebView 对 HTML5 原生 draggable 支持不稳定）：
+ * 拖起后卡片脱离文档流跟随指针，列表中留下虚线占位框标记放置位置，悬停到某张卡片上时
+ * 占位框让位到该卡片位置（卡片顺次后移），点击拖拽手柄立即进入拖拽，其余区域长按亦可。
+ */
+
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { message } from '@/core/message'
@@ -8,16 +21,15 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import { copyText, probe } from '@/core/http'
 import type { DocProject } from '@/core/types'
 import { fromNow, normalizeBaseUrl } from '@/core/utils'
-import { useAppStore } from '@/stores/app'
 import { useProjectStore, type ProjectInput } from '@/stores/project'
 
 const router = useRouter()
 const projectStore = useProjectStore()
-const appStore = useAppStore()
 
 /* ------------------------------ 列表与搜索 ------------------------------ */
 
 const keyword = ref('')
+const searchRef = ref<HTMLInputElement>()
 
 const filteredProjects = computed<DocProject[]>(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -30,6 +42,85 @@ const filteredProjects = computed<DocProject[]>(() => {
       (item.description ?? '').toLowerCase().includes(kw)
   )
 })
+
+/** 快捷键提示文案：按平台区分 ⌘ / Ctrl */
+const modKeyLabel = computed(() => (/mac|iphone|ipad/i.test(navigator.userAgent) ? '⌘ K' : 'Ctrl K'))
+
+async function focusSearch() {
+  await nextTick()
+  searchRef.value?.focus()
+}
+
+/** Ctrl/⌘ + K 聚焦项目搜索；Esc 清空已输入的关键词 */
+function onGlobalKeydown(event: KeyboardEvent) {
+  const mod = event.ctrlKey || event.metaKey
+  if (mod && event.key.toLowerCase() === 'k') {
+    event.preventDefault()
+    void focusSearch()
+    return
+  }
+  if (event.key === 'Escape' && document.activeElement === searchRef.value) {
+    keyword.value = ''
+  }
+}
+
+/* ------------------------------ 视图模式 ------------------------------ */
+
+const VIEW_KEY = 'knife4doc:projectView'
+
+function readViewMode(): 'grid' | 'list' {
+  try {
+    return window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid'
+  } catch {
+    return 'grid'
+  }
+}
+
+const viewMode = ref<'grid' | 'list'>(readViewMode())
+
+watch(viewMode, (value) => {
+  try {
+    window.localStorage.setItem(VIEW_KEY, value)
+  } catch {
+    /* 隐私模式下 localStorage 不可用，忽略即可 */
+  }
+})
+
+/* ------------------------------ 展示辅助 ------------------------------ */
+
+/** 列表序号：#01 / #02 …… */
+function indexLabel(index: number): string {
+  return `#${String(index + 1).padStart(2, '0')}`
+}
+
+/** 是否已同步过文档（决定展示「文档规模」还是「接口架构」） */
+function isSynced(project: DocProject): boolean {
+  return Boolean(project.meta?.apiCount || project.meta?.groupCount)
+}
+
+/** 文档规模文案，例如：137 接口  5 分组 · OpenAPI 3.0.3 */
+function scaleLabel(project: DocProject): string {
+  const meta = project.meta
+  if (!meta || (!meta.apiCount && !meta.groupCount)) return '尚未同步文档'
+  const parts: string[] = []
+  if (meta.apiCount) parts.push(`${meta.apiCount} 接口`)
+  if (meta.groupCount) parts.push(`${meta.groupCount} 分组`)
+  const spec = meta.specVersion
+    ? meta.specVersion.startsWith('2')
+      ? 'Swagger 2.0'
+      : `OpenAPI ${meta.specVersion}`
+    : ''
+  return [parts.join('  '), spec].filter(Boolean).join(' · ')
+}
+
+/** 把主题色转成带透明度的 rgba，用于头像底色等弱化色块 */
+function tint(hex: string, alpha: number): string {
+  const raw = String(hex ?? '').replace('#', '')
+  const full = raw.length === 3 ? raw.split('').map((c) => c + c).join('') : raw
+  const num = Number.parseInt(full, 16)
+  if (full.length !== 6 || !Number.isFinite(num)) return `rgba(79, 124, 255, ${alpha})`
+  return `rgba(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}, ${alpha})`
+}
 
 /* ------------------------------ 新增 / 编辑 ----------------------------- */
 
@@ -150,6 +241,19 @@ function openProject(project: DocProject) {
   void router.push({ name: 'doc', params: { projectId: project.id } })
 }
 
+/**
+ * 在浏览器中打开服务地址。
+ * 桌面客户端的 WebView 通常会拦截 window.open，此时退化为复制地址并给出提示，
+ * 保证按钮在任何环境下都有明确反馈。
+ */
+async function openExternal(project: DocProject) {
+  const opened = window.open(project.baseUrl, '_blank', 'noopener,noreferrer')
+  if (opened) return
+  const ok = await copyText(project.baseUrl)
+  if (ok) message.info('已复制地址，可在浏览器中打开')
+  else message.warning('打开失败，请手动复制地址')
+}
+
 /* ------------------------------ 拖拽排序（占位框模式） ------------------------------ */
 // Tauri 的 WebView 对 HTML5 原生 draggable 支持不稳定，改用 Pointer Events 实现：
 // 拖起后卡片脱离文档流（fixed）跟随鼠标，列表中留下虚线占位框标记放置位置；
@@ -216,7 +320,11 @@ const floatingStyle = computed<Record<string, string>>((): Record<string, string
 
 /** 每张卡片的内联样式：主题色 + 拖拽期间的悬浮定位 / 排序位置 */
 function cardStyle(project: DocProject): Record<string, string | number> {
-  const style: Record<string, string | number> = { '--card-color': project.color }
+  const style: Record<string, string | number> = {
+    '--card-color': project.color,
+    '--card-soft': tint(project.color, 0.16),
+    '--card-line': tint(project.color, 0.45)
+  }
   if (!dragActive.value) return style
   if (project.id === draggedId.value) return { ...style, ...floatingStyle.value }
   const order = previewOrder.value.indexOf(project.id)
@@ -254,7 +362,7 @@ function onHandlePointerDown(project: DocProject, event: PointerEvent) {
 /** 进入拖拽模式：捕获卡片位置，占位框默认落在卡片原位 */
 function startDrag(project: DocProject) {
   if (dragActive.value) return
-  const card = pressEl?.closest('.project-card') as HTMLElement | null
+  const card = pressEl?.closest('.project-item') as HTMLElement | null
   const rect = card?.getBoundingClientRect()
   if (rect) {
     dragRect.x = rect.left
@@ -286,14 +394,14 @@ function resetDropIndex() {
 /** 更新放置目标：悬停卡片让位、悬停占位框/间隙保持、离开列表还原 */
 function updateDropTarget(x: number, y: number) {
   const el = document.elementFromPoint(x, y) as HTMLElement | null
-  if (!el || !el.closest('.project-grid')) {
+  if (!el || !el.closest('.project-items')) {
     // 指针离开列表区域：占位框回到原位
     resetDropIndex()
     return
   }
   // 悬停在占位框上：保持当前位置（松手即落到占位框所在处）
-  if (el.closest('.project-card__ghost')) return
-  const card = el.closest('.project-card') as HTMLElement | null
+  if (el.closest('.is-ghost')) return
+  const card = el.closest('.project-item') as HTMLElement | null
   const id = card?.dataset.id
   if (!id || id === draggedId.value) return
   // 占位框移动到该卡片当前所在的位置，卡片顺次让位
@@ -359,19 +467,21 @@ function onDragKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && dragActive.value) endDrag(false)
 }
 
-/** 记录中的接口数量等信息 */
-function metaText(project: DocProject): string {
-  const meta = project.meta
-  if (!meta || (!meta.apiCount && !meta.groupCount)) return '尚未同步文档'
-  const parts: string[] = []
-  if (meta.apiCount) parts.push(`${meta.apiCount} 个接口`)
-  if (meta.groupCount && meta.groupCount > 1) parts.push(`${meta.groupCount} 个分组`)
-  if (meta.specVersion) parts.push(meta.specVersion.startsWith('2') ? 'Swagger 2.0' : `OpenAPI ${meta.specVersion}`)
-  return parts.join(' · ') || '尚未同步文档'
-}
+/* ------------------------------ 地址可用性探测 ------------------------------ */
 
 /** 地址可用性探测缓存 */
 const statusMap = reactive<Record<string, 'idle' | 'checking' | 'ok' | 'fail'>>({})
+
+const STATUS_TEXT: Record<string, string> = {
+  idle: '未检测',
+  checking: '检测中',
+  ok: '可访问',
+  fail: '不可达'
+}
+
+function statusLabel(project: DocProject): string {
+  return STATUS_TEXT[statusMap[project.id] ?? 'idle'] ?? '未检测'
+}
 
 async function checkStatus(project: DocProject) {
   statusMap[project.id] = 'checking'
@@ -406,6 +516,7 @@ onMounted(() => {
   window.addEventListener('pointerup', onPointerUp)
   window.addEventListener('pointercancel', onPointerCancel)
   window.addEventListener('keydown', onDragKeydown)
+  window.addEventListener('keydown', onGlobalKeydown)
 })
 
 onUnmounted(() => {
@@ -413,160 +524,284 @@ onUnmounted(() => {
   window.removeEventListener('pointerup', onPointerUp)
   window.removeEventListener('pointercancel', onPointerCancel)
   window.removeEventListener('keydown', onDragKeydown)
+  window.removeEventListener('keydown', onGlobalKeydown)
   clearPress()
 })
 </script>
 
 <template>
   <div class="project-page">
-    <!-- 项目列表工具栏：搜索 + 新增 -->
+    <!-- 工具栏：搜索 + 视图切换 + 新增 -->
     <div class="project-page__toolbar">
-      <el-input
-        v-model="keyword"
-        class="search-input"
-        placeholder="搜索项目名称或地址"
-        clearable
-      >
-        <template #prefix>
-          <el-icon><Search /></el-icon>
-        </template>
-      </el-input>
+      <div class="search-box" @click="focusSearch">
+        <el-icon class="search-box__icon"><Search /></el-icon>
+        <input
+          ref="searchRef"
+          v-model="keyword"
+          class="search-box__input"
+          type="text"
+          placeholder="搜索项目名称、服务地址或分组..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button
+          v-if="keyword"
+          type="button"
+          class="search-box__clear"
+          title="清空"
+          @click.stop="keyword = ''"
+        >
+          <el-icon><Close /></el-icon>
+        </button>
+        <kbd class="search-box__kbd">{{ modKeyLabel }}</kbd>
+      </div>
 
-      <el-button type="primary" @click="openCreate">
-        <el-icon><Plus /></el-icon>
-        <span>新增项目</span>
-      </el-button>
+      <div class="project-page__toolbar-right">
+        <div class="view-switch" role="group" aria-label="视图切换">
+          <button
+            type="button"
+            class="view-switch__btn"
+            :class="{ 'is-active': viewMode === 'grid' }"
+            title="网格视图"
+            @click="viewMode = 'grid'"
+          >
+            <el-icon><Grid /></el-icon>
+          </button>
+          <button
+            type="button"
+            class="view-switch__btn"
+            :class="{ 'is-active': viewMode === 'list' }"
+            title="列表视图"
+            @click="viewMode = 'list'"
+          >
+            <el-icon><List /></el-icon>
+          </button>
+        </div>
+
+        <button type="button" class="new-btn" @click="openCreate">
+          <el-icon><Plus /></el-icon>
+          <span>新增项目</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 概览条：激活服务数量 / 离线运行说明 -->
+    <div class="project-page__meta">
+      <div class="project-page__meta-left">
+        <span class="count-tag">共 {{ projectStore.count }} 个激活服务</span>
+      </div>
+      <span class="safe-tip">
+        <el-icon><CircleCheck /></el-icon>
+        离线安全运行 · 无云端上传
+      </span>
     </div>
 
     <main class="project-page__body kd-scroll">
-      <div class="project-page__summary">
-        <span>共 {{ projectStore.count }} 个项目</span>
-        <span v-if="projectStore.projects.length" class="project-page__hint">
-          {{
-            appStore.isDesktop
-              ? `数据保存在 ${appStore.dataRootLabel} 的 data.json，不会上传到任何服务器`
-              : '浏览器预览模式：数据暂存在 localStorage'
-          }}
-        </span>
-      </div>
-
+      <!-- 有数据但被搜索过滤掉 -->
       <EmptyState
-        v-if="projectStore.projects.length === 0"
-        icon="Files"
-        title="还没有任何项目"
-        description="添加一个后端服务地址（例如 http://127.0.0.1:9999），系统会自动发现 springfox / springdoc 暴露的接口文档。"
-      >
-        <el-button type="primary" @click="openCreate">
-          <el-icon><Plus /></el-icon>
-          <span>新增第一个项目</span>
-        </el-button>
-      </EmptyState>
-
-      <EmptyState
-        v-else-if="filteredProjects.length === 0"
+        v-if="projectStore.projects.length > 0 && filteredProjects.length === 0"
         icon="Search"
         title="没有匹配的项目"
-        description="换个关键词试试"
+        description="换个关键词试试，或清空搜索框查看全部服务。"
       />
 
-      <div v-else class="project-grid" :class="{ 'is-drag-active': dragActive }">
+      <!-- 服务列表：网格 / 列表双视图 + 新增占位卡 -->
+      <div
+        v-else
+        class="project-items"
+        :class="[viewMode === 'grid' ? 'is-grid' : 'is-list', { 'is-drag-active': dragActive }]"
+      >
         <article
-          v-for="project in filteredProjects"
+          v-for="(project, index) in filteredProjects"
           :key="project.id"
-          class="project-card"
-          :class="{ 'is-floating': dragActive && draggedId === project.id }"
+          class="project-item"
+          :class="[
+            viewMode === 'grid' ? 'is-card' : 'is-row',
+            { 'is-floating': dragActive && draggedId === project.id }
+          ]"
           :style="cardStyle(project)"
           :data-id="project.id"
           @pointerdown="onCardPointerDown(project, $event)"
           @click="openProject(project)"
         >
-          <div class="project-card__bar" />
+          <!-- ------------------------------ 网格卡片视图 ------------------------------ -->
+          <template v-if="viewMode === 'grid'">
+            <span class="project-item__accent" />
 
-          <div class="project-card__head">
-            <div class="project-card__avatar" :style="{ background: project.color }">
-              {{ project.name.slice(0, 1).toUpperCase() }}
-            </div>
-            <div class="project-card__title">
-              <h3>{{ project.name }}</h3>
-              <span class="project-card__time">最近访问：{{ fromNow(project.lastOpened) }}</span>
-            </div>
+            <header class="card-head">
+              <span class="project-avatar">{{ project.name.slice(0, 1).toUpperCase() }}</span>
 
-            <!-- 拖拽手柄：点击即可直接拖动排序；在卡片其它区域长按也可拖动 -->
-            <span
-              v-if="dragEnabled"
-              class="project-card__drag"
-              title="拖动排序"
-              @pointerdown.stop="onHandlePointerDown(project, $event)"
-              @click.stop
-            >
-              <el-icon><Rank /></el-icon>
-            </span>
+              <div class="project-title">
+                <span class="project-title__name">{{ project.name }}</span>
+                <span class="project-title__index kd-mono">{{ indexLabel(index) }}</span>
+              </div>
 
-            <span
-              class="project-card__status"
-              :class="`is-${statusMap[project.id] ?? 'idle'}`"
-              @click.stop
-            >
-              <template v-if="statusMap[project.id] === 'checking'">
-                <el-icon class="is-spin"><Loading /></el-icon>
-                检测中
-              </template>
-              <template v-else-if="statusMap[project.id] === 'ok'">
-                <i class="dot" />
-                可访问
-              </template>
-              <template v-else-if="statusMap[project.id] === 'fail'">
-                <i class="dot" />
-                不可达
-              </template>
-              <template v-else>
-                <i class="dot" />
-                未检测
-              </template>
-            </span>
-          </div>
+              <span
+                v-if="dragEnabled"
+                class="project-handle"
+                title="拖动排序"
+                @pointerdown.stop="onHandlePointerDown(project, $event)"
+                @click.stop
+              >
+                <el-icon><Rank /></el-icon>
+              </span>
 
-          <div class="project-card__url kd-mono">{{ project.baseUrl }}</div>
+              <span
+                class="status-pill"
+                :class="`is-${statusMap[project.id] ?? 'idle'}`"
+                title="点击重新检测连通性"
+                @click.stop="checkStatus(project)"
+              >
+                <el-icon v-if="statusMap[project.id] === 'checking'" class="is-spin">
+                  <Loading />
+                </el-icon>
+                <i v-else class="status-pill__dot" />
+                {{ statusLabel(project) }}
+              </span>
+            </header>
 
-          <p v-if="project.description" class="project-card__desc">{{ project.description }}</p>
-          <p v-else class="project-card__desc is-placeholder">暂无备注</p>
+            <div class="project-visited">最近访问：{{ fromNow(project.lastOpened) }}</div>
 
-          <div class="project-card__meta">
-            <span class="project-card__meta-text">{{ metaText(project) }}</span>
-          </div>
+            <div class="project-divider" />
 
-          <div class="project-card__footer" @click.stop>
-            <el-button size="small" type="primary" plain @click="openProject(project)">
-              <el-icon><Document /></el-icon>
-              <span>查看文档</span>
-            </el-button>
-            <el-button-group>
-              <el-tooltip content="检测连通性" placement="top">
-                <el-button size="small" @click="checkStatus(project)">
-                  <el-icon><Connection /></el-icon>
-                </el-button>
-              </el-tooltip>
-              <el-tooltip content="复制地址" placement="top">
-                <el-button size="small" @click="handleCopyUrl(project)">
+            <div class="project-field">
+              <span class="project-field__label">服务端点（HOST ENDPOINT）</span>
+              <div class="endpoint">
+                <span class="endpoint__url kd-mono">{{ project.baseUrl }}</span>
+                <button
+                  type="button"
+                  class="endpoint__copy"
+                  title="复制地址"
+                  @click.stop="handleCopyUrl(project)"
+                >
                   <el-icon><CopyDocument /></el-icon>
-                </el-button>
-              </el-tooltip>
-              <el-tooltip content="编辑" placement="top">
-                <el-button size="small" @click="openEdit(project)">
+                </button>
+              </div>
+            </div>
+
+            <dl class="info-rows">
+              <div class="info-row">
+                <dt>备注信息</dt>
+                <dd :class="{ 'is-muted': !project.description }">
+                  {{ project.description || '暂无备注' }}
+                </dd>
+              </div>
+              <div class="info-row">
+                <dt>{{ isSynced(project) ? '文档规模' : '接口架构' }}</dt>
+                <dd v-if="isSynced(project)" class="is-strong">{{ scaleLabel(project) }}</dd>
+                <dd v-else class="is-pending"><i class="pending-dot" />尚未同步文档</dd>
+              </div>
+            </dl>
+
+            <footer class="project-item__footer">
+              <button type="button" class="doc-btn" @click.stop="openProject(project)">
+                <el-icon><Document /></el-icon>
+                <span>查看文档</span>
+              </button>
+
+              <div class="icon-actions">
+                <button type="button" title="在浏览器中打开" @click.stop="openExternal(project)">
+                  <el-icon><TopRight /></el-icon>
+                </button>
+                <button type="button" title="复制地址" @click.stop="handleCopyUrl(project)">
+                  <el-icon><CopyDocument /></el-icon>
+                </button>
+                <button type="button" title="编辑" @click.stop="openEdit(project)">
                   <el-icon><EditPen /></el-icon>
-                </el-button>
-              </el-tooltip>
-              <el-tooltip content="删除" placement="top">
-                <el-button size="small" type="danger" plain @click="handleRemove(project)">
+                </button>
+                <button
+                  type="button"
+                  class="is-danger"
+                  title="删除"
+                  @click.stop="handleRemove(project)"
+                >
                   <el-icon><Delete /></el-icon>
-                </el-button>
-              </el-tooltip>
-            </el-button-group>
-          </div>
+                </button>
+              </div>
+            </footer>
+          </template>
+
+          <!-- ------------------------------ 紧凑列表视图 ------------------------------ -->
+          <template v-else>
+            <span class="project-item__accent" />
+
+            <span class="project-avatar">{{ project.name.slice(0, 1).toUpperCase() }}</span>
+
+            <div class="project-title">
+              <span class="project-title__name">{{ project.name }}</span>
+              <span class="project-title__index kd-mono">{{ indexLabel(index) }}</span>
+            </div>
+
+            <span
+              class="status-pill"
+              :class="`is-${statusMap[project.id] ?? 'idle'}`"
+              title="点击重新检测连通性"
+              @click.stop="checkStatus(project)"
+            >
+              <el-icon v-if="statusMap[project.id] === 'checking'" class="is-spin"><Loading /></el-icon>
+              <i v-else class="status-pill__dot" />
+              {{ statusLabel(project) }}
+            </span>
+
+            <span class="row-url kd-mono">{{ project.baseUrl }}</span>
+
+            <span class="row-meta" :class="{ 'is-muted': !isSynced(project) }">
+              {{ scaleLabel(project) }}
+            </span>
+
+            <span class="row-visited">最近访问：{{ fromNow(project.lastOpened) }}</span>
+
+            <div class="icon-actions">
+              <span
+                v-if="dragEnabled"
+                class="project-handle"
+                title="拖动排序"
+                @pointerdown.stop="onHandlePointerDown(project, $event)"
+                @click.stop
+              >
+                <el-icon><Rank /></el-icon>
+              </span>
+              <button type="button" title="查看文档" @click.stop="openProject(project)">
+                <el-icon><Document /></el-icon>
+              </button>
+              <button type="button" title="在浏览器中打开" @click.stop="openExternal(project)">
+                <el-icon><TopRight /></el-icon>
+              </button>
+              <button type="button" title="复制地址" @click.stop="handleCopyUrl(project)">
+                <el-icon><CopyDocument /></el-icon>
+              </button>
+              <button type="button" title="编辑" @click.stop="openEdit(project)">
+                <el-icon><EditPen /></el-icon>
+              </button>
+              <button type="button" class="is-danger" title="删除" @click.stop="handleRemove(project)">
+                <el-icon><Delete /></el-icon>
+              </button>
+            </div>
+          </template>
         </article>
 
-        <!-- 拖拽占位框：标记当前放置位置，被拖卡片让位后留出的空槽 -->
-        <div v-if="dragActive" class="project-card__ghost" :style="{ order: ghostOrder }" />
+        <!-- 拖拽占位框：标记当前放置位置 -->
+        <div
+          v-if="dragActive"
+          class="project-item is-ghost"
+          :class="viewMode === 'grid' ? 'is-card' : 'is-row'"
+          :style="{ order: ghostOrder }"
+        />
+
+        <!-- 新增占位卡：接入新微服务文档 -->
+        <button
+          v-if="!dragActive"
+          type="button"
+          class="add-card"
+          :class="viewMode === 'grid' ? 'is-card' : 'is-row'"
+          @click="openCreate"
+        >
+          <span class="add-card__plus"><el-icon><Plus /></el-icon></span>
+          <span class="add-card__title">接入新微服务文档</span>
+          <span class="add-card__desc">
+            支持 OpenAPI v2/v3、Swagger UI、Knife4j 及标准 JSON/YAML 规范
+          </span>
+        </button>
       </div>
     </main>
 
@@ -625,79 +860,252 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100%;
   background: var(--kd-bg);
+  overflow: hidden;
 }
+
+/* ------------------------------ 工具栏 ------------------------------ */
 
 .project-page__toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 28px;
-  border-bottom: 1px solid var(--kd-border);
+  padding: 12px 20px;
+  flex-shrink: 0;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  max-width: 620px;
+  height: 38px;
+  padding: 0 10px 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--kd-border);
   background: var(--kd-panel);
+  cursor: text;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+
+  &:focus-within {
+    border-color: var(--kd-primary);
+    box-shadow: 0 0 0 3px var(--kd-primary-soft);
+  }
+}
+
+.search-box__icon {
+  color: var(--kd-text-3);
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.search-box__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: $font-md;
+  color: var(--kd-text);
+
+  &::placeholder {
+    color: var(--kd-text-3);
+  }
+}
+
+.search-box__clear {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--kd-text-3);
+  font-size: 13px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--kd-panel-3);
+    color: var(--kd-text);
+  }
+}
+
+.search-box__kbd {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--kd-border);
+  background: var(--kd-panel-3);
+  color: var(--kd-text-3);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.project-page__toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.view-switch {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 9px;
+  border: 1px solid var(--kd-border);
+  background: var(--kd-panel-2);
+}
+
+.view-switch__btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--kd-text-3);
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+
+  &:hover {
+    color: var(--kd-text);
+  }
+
+  &.is-active {
+    background: var(--kd-panel);
+    color: var(--kd-primary);
+    box-shadow: var(--kd-shadow-sm);
+  }
+}
+
+.new-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--kd-primary);
+  color: #fff;
+  font-size: $font-sm;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+
+  &:hover {
+    background: var(--kd-primary-hover);
+    box-shadow: 0 6px 16px rgba(79, 124, 255, 0.28);
+  }
+
+  &:active {
+    transform: translateY(1px);
+  }
+}
+
+/* ------------------------------ 概览条 ------------------------------ */
+
+.project-page__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px 12px;
+  flex-shrink: 0;
   flex-wrap: wrap;
 }
 
-.search-input {
-  width: 260px;
+.project-page__meta-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
+
+.count-tag {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--kd-border);
+  background: var(--kd-panel);
+  font-size: $font-xs;
+  color: var(--kd-text-2);
+  white-space: nowrap;
+}
+
+.safe-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: $font-xs;
+  color: var(--kd-success);
+  white-space: nowrap;
+
+  .el-icon {
+    font-size: 14px;
+  }
+}
+
+/* ------------------------------ 列表容器 ------------------------------ */
 
 .project-page__body {
   flex: 1;
   min-height: 0;
-  padding: 20px 28px 40px;
+  padding: 0 20px 32px;
 }
 
-.project-page__summary {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  font-size: $font-sm;
-  color: var(--kd-text-2);
-}
-
-.project-page__hint {
-  color: var(--kd-text-3);
-  font-size: $font-xs;
-}
-
-.project-grid {
+.project-items.is-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 16px;
-
-  /* 拖拽期间禁用文本选择，避免干扰 */
-  &.is-drag-active {
-    user-select: none;
-  }
 }
 
-.project-card {
+.project-items.is-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.project-items.is-drag-active {
+  user-select: none;
+}
+
+/* ------------------------------ 卡片：公共部分 ------------------------------ */
+
+.project-item {
   position: relative;
+  overflow: hidden;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
+}
+
+.project-item.is-card {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 18px;
+  padding: 16px;
   border-radius: $radius-lg;
   border: 1px solid var(--kd-border);
   background: var(--kd-panel);
   cursor: pointer;
-  overflow: hidden;
-  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
 
   &:hover {
     transform: translateY(-2px);
-    border-color: var(--card-color);
+    border-color: var(--card-line, var(--kd-border-strong));
     box-shadow: var(--kd-shadow-md);
 
-    .project-card__bar {
+    .project-item__accent {
       opacity: 1;
     }
   }
 
   &.is-floating {
-    opacity: 0.95;
+    opacity: 0.96;
     box-shadow: var(--kd-shadow-lg);
     cursor: grabbing;
     user-select: none;
@@ -706,122 +1114,123 @@ onUnmounted(() => {
   }
 }
 
-/* 拖拽占位框：标记当前放置位置 */
-.project-card__ghost {
-  min-height: 140px;
-  border: 2px dashed var(--kd-primary);
-  border-radius: $radius-lg;
-  background: var(--kd-primary-soft);
-  opacity: 0.55;
-}
-
-/* 拖拽手柄 */
-.project-card__drag {
-  display: inline-flex;
+.project-item.is-row {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: $radius-sm;
-  color: var(--kd-text-3);
-  font-size: 16px;
-  cursor: grab;
-  flex-shrink: 0;
-  // 触摸设备上点击手柄时阻止滚动，保证按住即可拖动
-  touch-action: none;
-  transition: color 0.14s ease, background 0.14s ease;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: $radius-md;
+  border: 1px solid var(--kd-border);
+  background: var(--kd-panel);
+  cursor: pointer;
 
   &:hover {
-    color: var(--kd-primary);
-    background: var(--kd-panel-3);
+    border-color: var(--card-line, var(--kd-border-strong));
+    box-shadow: var(--kd-shadow-sm);
+
+    .project-item__accent {
+      opacity: 1;
+    }
   }
 
-  &:active {
+  &.is-floating {
+    opacity: 0.96;
+    box-shadow: var(--kd-shadow-lg);
     cursor: grabbing;
+    user-select: none;
+    transition: none;
   }
 }
 
-.project-card__bar {
+.project-item__accent {
   position: absolute;
   inset: 0 0 auto 0;
   height: 3px;
-  background: var(--card-color);
-  opacity: 0.55;
+  background: var(--card-color, var(--kd-primary));
+  opacity: 0.5;
   transition: opacity 0.16s ease;
 }
 
-.project-card__head {
+/* 卡片头部：头像 + 名称 + 拖拽手柄 + 状态胶囊 */
+.card-head {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.project-card__avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: $radius-md;
+/* 头像：主题色的弱化底色 + 同色文字 */
+.project-avatar {
   display: grid;
   place-items: center;
-  color: #fff;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--card-soft, var(--kd-primary-soft));
+  color: var(--card-color, var(--kd-primary));
   font-weight: 700;
   font-size: 15px;
+}
+
+.card-head .project-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.project-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-title__name {
+  font-size: $font-md;
+  font-weight: 600;
+  color: var(--kd-text);
+  @include ellipsis(1);
+}
+
+.project-title__index {
+  font-size: 11px;
+  color: var(--kd-text-3);
   flex-shrink: 0;
 }
 
-.project-card__title {
-  flex: 1;
-  min-width: 0;
-
-  h3 {
-    font-size: $font-md;
-    @include ellipsis(1);
-  }
-}
-
-.project-card__time {
-  font-size: $font-xs;
-  color: var(--kd-text-3);
-}
-
-.project-card__status {
+/* 连通性状态胶囊：点击可重新检测 */
+.status-pill {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 2px 8px;
+  padding: 2px 9px;
   border-radius: 999px;
   font-size: 11px;
   background: var(--kd-panel-3);
   color: var(--kd-text-3);
   flex-shrink: 0;
+  cursor: pointer;
+  white-space: nowrap;
 
-  .dot {
+  &__dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--kd-text-3);
+    background: currentColor;
   }
 
   &.is-ok {
     background: var(--kd-success-soft);
     color: var(--kd-success);
-
-    .dot {
-      background: var(--kd-success);
-    }
   }
 
   &.is-fail {
     background: var(--kd-danger-soft);
     color: var(--kd-danger);
-
-    .dot {
-      background: var(--kd-danger);
-    }
   }
 
   &.is-checking {
-    color: var(--kd-primary);
     background: var(--kd-primary-soft);
+    color: var(--kd-primary);
   }
 }
 
@@ -835,46 +1244,354 @@ onUnmounted(() => {
   }
 }
 
-.project-card__url {
-  font-size: $font-xs;
-  color: var(--kd-primary);
-  padding: 5px 8px;
+/* 拖拽手柄 */
+.project-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   border-radius: $radius-sm;
-  background: var(--kd-panel-2);
-  @include ellipsis(1);
-}
+  color: var(--kd-text-3);
+  font-size: 15px;
+  cursor: grab;
+  flex-shrink: 0;
+  // 触摸设备上点击手柄时阻止滚动，保证按住即可拖动
+  touch-action: none;
+  transition: color 0.14s ease, background 0.14s ease, opacity 0.14s ease;
 
-.project-card__desc {
-  font-size: $font-sm;
-  color: var(--kd-text-2);
-  min-height: 20px;
-  @include ellipsis(2);
+  &:hover {
+    color: var(--kd-primary);
+    background: var(--kd-panel-3);
+  }
 
-  &.is-placeholder {
-    color: var(--kd-text-3);
+  &:active {
+    cursor: grabbing;
   }
 }
 
-.project-card__meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* 网格视图的手柄平时隐藏，悬停卡片时才显形 */
+.card-head .project-handle {
+  opacity: 0;
 }
 
-.project-card__meta-text {
+.project-item.is-card:hover .project-handle,
+.project-item.is-floating .project-handle {
+  opacity: 1;
+}
+
+/* ------------------------------ 网格视图细节 ------------------------------ */
+
+.project-visited {
   font-size: $font-xs;
   color: var(--kd-text-3);
 }
 
-.project-card__footer {
+.project-divider {
+  height: 1px;
+  background: var(--kd-border);
+  margin: 2px 0 4px;
+}
+
+.project-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.project-field__label {
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  color: var(--kd-text-3);
+}
+
+.endpoint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 10px;
+  border-radius: $radius-md;
+  border: 1px solid var(--kd-border);
+  background: var(--kd-panel-2);
+}
+
+.endpoint__url {
+  flex: 1;
+  min-width: 0;
+  font-size: $font-xs;
+  color: var(--kd-primary);
+  @include ellipsis(1);
+}
+
+.endpoint__copy {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: $radius-sm;
+  background: transparent;
+  color: var(--kd-text-3);
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--kd-panel-3);
+    color: var(--kd-primary);
+  }
+}
+
+.info-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.info-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: $font-xs;
+
+  dt {
+    flex-shrink: 0;
+    color: var(--kd-text-3);
+  }
+
+  dd {
+    margin: 0;
+    min-width: 0;
+    color: var(--kd-text-2);
+    @include ellipsis(1);
+
+    &.is-muted {
+      color: var(--kd-text-3);
+    }
+
+    &.is-strong {
+      color: var(--kd-text);
+    }
+
+    &.is-pending {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--kd-warning);
+    }
+  }
+}
+
+.pending-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--kd-warning);
+  flex-shrink: 0;
+}
+
+.project-item__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding-top: 12px;
-  border-top: 1px dashed var(--kd-border);
   margin-top: auto;
+  border-top: 1px dashed var(--kd-border);
 }
+
+.doc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: $radius-md;
+  border: 1px solid var(--kd-primary);
+  background: var(--kd-primary-soft);
+  color: var(--kd-primary);
+  font-size: $font-xs;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+
+  &:hover {
+    background: var(--kd-primary);
+    color: #fff;
+  }
+}
+
+/* 图标操作组 */
+.icon-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+
+  button {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border: 0;
+    border-radius: $radius-sm;
+    background: transparent;
+    color: var(--kd-text-3);
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.14s ease, color 0.14s ease;
+
+    &:hover {
+      background: var(--kd-panel-3);
+      color: var(--kd-text);
+    }
+
+    &.is-danger:hover {
+      background: var(--kd-danger-soft);
+      color: var(--kd-danger);
+    }
+  }
+}
+
+/* ------------------------------ 列表视图细节 ------------------------------ */
+
+.is-row .project-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.is-row .project-title {
+  width: 210px;
+  flex-shrink: 0;
+}
+
+.row-url {
+  flex: 1;
+  min-width: 0;
+  font-size: $font-xs;
+  color: var(--kd-primary);
+  @include ellipsis(1);
+}
+
+.row-meta {
+  width: 200px;
+  flex-shrink: 0;
+  font-size: $font-xs;
+  color: var(--kd-text-2);
+  @include ellipsis(1);
+
+  &.is-muted {
+    color: var(--kd-warning);
+  }
+}
+
+.row-visited {
+  width: 150px;
+  flex-shrink: 0;
+  font-size: $font-xs;
+  color: var(--kd-text-3);
+  @include ellipsis(1);
+}
+
+/* ------------------------------ 拖拽占位框 ------------------------------ */
+
+.project-item.is-ghost {
+  pointer-events: none;
+  border: 2px dashed var(--kd-primary);
+  background: var(--kd-primary-soft);
+  opacity: 0.5;
+
+  &.is-row {
+    border-radius: $radius-md;
+    min-height: 54px;
+  }
+
+  &.is-card {
+    border-radius: $radius-lg;
+    min-height: 240px;
+  }
+}
+
+/* ------------------------------ 新增占位卡 ------------------------------ */
+
+.add-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed var(--kd-border-strong);
+  background: transparent;
+  color: var(--kd-text-3);
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+
+  &:hover {
+    border-color: var(--kd-primary);
+    background: var(--kd-primary-soft);
+    color: var(--kd-text-2);
+
+    .add-card__plus {
+      border-color: var(--kd-primary);
+      color: var(--kd-primary);
+    }
+  }
+
+  &.is-card {
+    flex-direction: column;
+    padding: 28px 24px;
+    border-radius: $radius-lg;
+    min-height: 240px;
+  }
+
+  &.is-row {
+    flex-direction: row;
+    padding: 14px;
+    border-radius: $radius-md;
+  }
+}
+
+.add-card__plus {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--kd-border-strong);
+  color: var(--kd-text-3);
+  font-size: 20px;
+  flex-shrink: 0;
+  transition: border-color 0.18s ease, color 0.18s ease;
+}
+
+.add-card__title {
+  font-size: $font-md;
+  font-weight: 600;
+  color: var(--kd-text-2);
+}
+
+.add-card__desc {
+  font-size: $font-xs;
+  color: var(--kd-text-3);
+  line-height: 1.7;
+  max-width: 320px;
+}
+
+.is-row .add-card__plus {
+  width: 30px;
+  height: 30px;
+  font-size: 15px;
+}
+
+.is-row .add-card__desc {
+  max-width: none;
+  @include ellipsis(1);
+}
+
+/* ------------------------------ 其它 ------------------------------ */
 
 .form-tip {
   margin-top: 6px;
@@ -890,17 +1607,35 @@ onUnmounted(() => {
   }
 }
 
-@include respond-to($bp-sm) {
+@include respond-to($bp-md) {
   .project-page__toolbar {
-    padding: 12px 16px;
+    padding: 12px 14px;
+    flex-wrap: wrap;
+  }
+
+  .search-box {
+    max-width: none;
+  }
+
+  .project-page__meta {
+    padding: 0 14px 12px;
   }
 
   .project-page__body {
-    padding: 16px;
+    padding: 0 14px 28px;
   }
 
-  .search-input {
-    width: 100%;
+  .project-items.is-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .is-row .row-meta,
+  .is-row .row-visited {
+    display: none;
+  }
+
+  .is-row .project-title {
+    width: auto;
   }
 }
 </style>

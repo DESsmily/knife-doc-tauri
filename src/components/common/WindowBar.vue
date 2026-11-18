@@ -1,15 +1,17 @@
 <script setup lang="ts">
 /**
- * 自定义窗口栏：固定在应用顶部，所有页面共用。
+ * 自定义窗口栏 = 全局顶部导航（固定在所有页面顶部，所有页面共用）。
  *
- * 应用使用自定义窗口（decorations: false，无原生标题栏），本栏承担窗口标题栏角色：
- *  - 左侧：应用标识，整条栏为窗口拖拽区域；
- *  - 右侧：设置入口、主题切换、窗口控制按钮（最小化 / 最大化 / 关闭）。
- * 设置入口直接放在窗口栏上，不使用下拉菜单。
+ * 应用使用自定义窗口（decorations: false，无原生标题栏），本栏同时承担两件事：
+ *  - 窗口标题栏：整条栏为窗口拖拽区域，右侧提供最小化 / 最大化 / 关闭；
+ *  - 应用级导航：应用标识 +「项目管理 / 快捷请求 / 同步日志」，
+ *    右侧为设置入口与主题切换。
+ *
+ * 设置入口直接放在窗口栏上，不使用下拉菜单，也不依赖原生窗口。
  */
 
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { useTheme } from '@/composables/useTheme'
 import {
@@ -21,6 +23,21 @@ import {
   toggleMaximizeWindow
 } from '@/core/tauri'
 
+interface NavItem {
+  path: string
+  label: string
+  icon: string
+  /** 该导航项在哪些路由下保持高亮（接口文档属于「项目管理」的下级页面） */
+  active: (path: string) => boolean
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { path: '/', label: '项目管理', icon: 'Files', active: (path) => path === '/' || path.startsWith('/doc') },
+  { path: '/quick', label: '快捷请求', icon: 'Lightning', active: (path) => path.startsWith('/quick') },
+  { path: '/sync-log', label: '同步日志', icon: 'Clock', active: (path) => path.startsWith('/sync-log') }
+]
+
+const route = useRoute()
 const router = useRouter()
 const { isDark, toggleTheme } = useTheme()
 
@@ -67,33 +84,46 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <header class="win-bar">
-    <!-- 左侧：应用标识（拖拽区域） -->
-    <div class="win-bar__brand">
-      <div class="win-bar__logo">KD</div>
-      <span class="win-bar__name">Knife Doc Tool</span>
+  <header class="app-bar">
+    <!-- 应用标识（拖拽区域） -->
+    <div class="app-bar__brand">
+      <div class="app-bar__logo">KD</div>
+      <span class="app-bar__name">Knife Doc Tool</span>
     </div>
 
-    <!-- 右侧：设置、主题切换、窗口控制 -->
-    <div class="win-bar__actions">
-      <el-button link class="win-bar__btn" @click="goSettings">
-        <el-icon><Setting /></el-icon>
-        <span>设置</span>
-      </el-button>
-      <el-tooltip :content="isDark ? '切换到亮色' : '切换到暗色'" placement="bottom">
-        <el-button link class="win-bar__btn win-bar__btn--icon" @click="toggleTheme">
-          <el-icon><component :is="isDark ? 'Sunny' : 'Moon'" /></el-icon>
-        </el-button>
+    <span class="app-bar__split" />
+
+    <!-- 应用级导航 -->
+    <nav class="app-bar__nav">
+      <RouterLink
+        v-for="item in NAV_ITEMS"
+        :key="item.path"
+        :to="item.path"
+        class="app-bar__link"
+        :class="{ 'is-active': item.active(route.path) }"
+      >
+        <el-icon><component :is="item.icon" /></el-icon>
+        <span>{{ item.label }}</span>
+      </RouterLink>
+    </nav>
+
+    <!-- 右侧：设置、主题、窗口控制 -->
+    <div class="app-bar__actions">
+      <el-tooltip content="设置" placement="bottom">
+        <button type="button" class="app-bar__icon" aria-label="设置" @click="goSettings">
+          <el-icon><Setting /></el-icon>
+        </button>
       </el-tooltip>
 
-      <!-- 窗口控制按钮 -->
-      <div v-if="showWinControls" class="win-bar__win-controls">
-        <button
-          type="button"
-          class="win-ctrl"
-          title="最小化"
-          @click="handleMinimize"
-        >
+      <el-tooltip :content="isDark ? '切换到亮色' : '切换到暗色'" placement="bottom">
+        <button type="button" class="app-bar__icon" aria-label="切换主题" @click="toggleTheme">
+          <el-icon><component :is="isDark ? 'Sunny' : 'Moon'" /></el-icon>
+        </button>
+      </el-tooltip>
+
+      <!-- 窗口控制按钮（桌面客户端） -->
+      <div v-if="showWinControls" class="app-bar__win">
+        <button type="button" class="win-ctrl" title="最小化" @click="handleMinimize">
           <el-icon><Minus /></el-icon>
         </button>
         <button
@@ -104,12 +134,7 @@ onBeforeUnmount(() => {
         >
           <el-icon><component :is="isMaximized ? 'Aim' : 'FullScreen'" /></el-icon>
         </button>
-        <button
-          type="button"
-          class="win-ctrl win-ctrl--close"
-          title="关闭"
-          @click="handleClose"
-        >
+        <button type="button" class="win-ctrl win-ctrl--close" title="关闭" @click="handleClose">
           <el-icon><Close /></el-icon>
         </button>
       </div>
@@ -118,70 +143,146 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
-.win-bar {
+.app-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  height: 44px;
-  padding: 0 0 0 16px;
+  gap: 10px;
+  height: 48px;
+  padding: 0 0 0 14px;
   background: var(--kd-panel);
   border-bottom: 1px solid var(--kd-border);
   flex-shrink: 0;
   z-index: $z-header;
-  // 整条窗口栏可拖动窗口
+  // 整条栏可拖动窗口
   -webkit-app-region: drag;
   user-select: none;
 }
 
-.win-bar__brand {
+/* ------------------------------ 应用标识 ------------------------------ */
+
+.app-bar__brand {
   display: flex;
   align-items: center;
   gap: 9px;
+  flex-shrink: 0;
 }
 
-.win-bar__logo {
+.app-bar__logo {
   display: grid;
   place-items: center;
   width: 26px;
   height: 26px;
-  border-radius: $radius-sm;
-  background: linear-gradient(135deg, var(--kd-primary), #8a5cf6);
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--kd-primary), #6f5cf6);
   color: #fff;
   font-weight: 800;
   font-size: 12px;
   letter-spacing: 0.4px;
 }
 
-.win-bar__name {
-  font-size: $font-sm;
+.app-bar__name {
+  font-size: $font-md;
   font-weight: 700;
   color: var(--kd-text);
   letter-spacing: 0.3px;
 }
 
-.win-bar__actions {
+.app-bar__split {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--kd-border);
+  flex-shrink: 0;
+}
+
+/* ------------------------------ 导航 ------------------------------ */
+
+.app-bar__nav {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
+  min-width: 0;
+  // 导航必须可点击，且不参与窗口拖拽
+  -webkit-app-region: no-drag;
+}
+
+.app-bar__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: $font-sm;
+  color: var(--kd-text-2);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+
+  .el-icon {
+    font-size: 15px;
+    color: var(--kd-text-3);
+    transition: color 0.16s ease;
+  }
+
+  &:hover {
+    color: var(--kd-text);
+    background: var(--kd-panel-2);
+
+    .el-icon {
+      color: var(--kd-text-2);
+    }
+  }
+
+  &.is-active {
+    color: var(--kd-primary);
+    font-weight: 600;
+    background: var(--kd-primary-soft);
+    border-color: rgba(79, 124, 255, 0.35);
+
+    .el-icon {
+      color: var(--kd-primary);
+    }
+  }
+}
+
+/* ------------------------------ 右侧操作区 ------------------------------ */
+
+.app-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
   // 右侧操作区不可拖动，保证按钮可点击
   -webkit-app-region: no-drag;
 }
 
-.win-bar__btn {
-  gap: 4px;
-  font-size: $font-sm;
-}
-
-.win-bar__btn--icon {
+.app-bar__icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--kd-text-2);
   font-size: 16px;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+
+  &:hover {
+    background: var(--kd-panel-3);
+    color: var(--kd-text);
+  }
 }
 
-/* 窗口控制按钮 */
-.win-bar__win-controls {
+/* ------------------------------ 窗口控制按钮 ------------------------------ */
+
+.app-bar__win {
   display: flex;
   align-items: center;
-  margin-left: 8px;
-  padding-left: 8px;
+  margin-left: 6px;
+  padding-left: 6px;
   border-left: 1px solid var(--kd-border);
 }
 
@@ -206,6 +307,12 @@ onBeforeUnmount(() => {
   &--close:hover {
     background: #e8453c;
     color: #fff;
+  }
+}
+
+@include respond-to($bp-md) {
+  .app-bar__link span {
+    display: none;
   }
 }
 </style>

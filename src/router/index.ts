@@ -14,6 +14,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '快捷请求' }
   },
   {
+    path: '/sync-log',
+    name: 'sync-log',
+    component: () => import('@/views/SyncLogView.vue'),
+    meta: { title: '同步日志' }
+  },
+  {
     path: '/setting',
     name: 'setting',
     component: () => import('@/views/SettingsView.vue'),

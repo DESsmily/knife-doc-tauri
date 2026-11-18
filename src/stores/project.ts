@@ -4,6 +4,7 @@
 
 import { defineStore } from 'pinia'
 
+import { clearProjectCache } from '@/core/docCache'
 import { readBucket, writeBucket } from '@/core/storage'
 import type { DocProject, ProjectMeta } from '@/core/types'
 import { isValidHttpUrl, normalizeBaseUrl, uid } from '@/core/utils'
@@ -135,6 +136,8 @@ export const useProjectStore = defineStore('project', {
     remove(id: string) {
       this.projects = this.projects.filter((item) => item.id !== id)
       if (this.currentId === id) this.setCurrent('')
+      // 项目删除时，本地缓存的该文档数据一并清除
+      clearProjectCache(id)
       this.persist()
     },
 
