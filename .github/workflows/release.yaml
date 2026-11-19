@@ -32,17 +32,13 @@ jobs:
       # 从 CHANGELOG.md 抽取当前 tag 对应的版本说明，作为 Release 正文
       - name: Extract changelog
         id: changelog
+        shell: bash
         run: |
           node scripts/extract-changelog.mjs "${{ github.ref_name }}" > "$RUNNER_TEMP/changelog.md"
-          {
-            echo "body<<EOF"
-            cat "$RUNNER_TEMP/changelog.md"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-      
-      - name: Debug changelog output
-        run: | 
-          echo "Body is: [${{ steps.changelog.outputs.body }}]"
+          echo "===== changelog.md content start ====="
+          cat "$RUNNER_TEMP/changelog.md"
+          echo "===== changelog.md content end ====="
+          wc -c "$RUNNER_TEMP/changelog.md"
 
       - uses: tauri-apps/tauri-action@v1
         env:
@@ -52,7 +48,7 @@ jobs:
         with:
           releaseName: "Release ${{ github.ref_name }}"
           tagName: ${{ github.ref_name }}
-          releaseBody: ${{ steps.changelog.outputs.body }}   # 关键：用 releaseBody 传内容
+          body_path: ${{ runner.temp }}/changelog.md # 关键：直接指向文件
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
