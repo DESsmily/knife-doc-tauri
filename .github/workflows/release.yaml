@@ -31,13 +31,13 @@ jobs:
 
       # 从 CHANGELOG.md 抽取当前 tag 对应的版本说明，作为 Release 正文
       - name: Extract changelog
-        id: changelog
+        id: changelog # 用于后续步骤引用
         shell: bash
         run: |
           node scripts/extract-changelog.mjs "${{ github.ref_name }}" > "$RUNNER_TEMP/changelog.md"
           # 仍然打印出来方便在日志里核对
           cat "$RUNNER_TEMP/changelog.md"
-          # 文件内容原样写入 output（多行安全）
+          # 文件内容原样写入 output（多行安全） 写入 body 变量中 CHANGELOG_EOF 作为分隔符
           {
             echo 'body<<CHANGELOG_EOF'
             cat "$RUNNER_TEMP/changelog.md"
@@ -52,7 +52,7 @@ jobs:
         with:
           releaseName: "Release ${{ github.ref_name }}"
           tagName: ${{ github.ref_name }}
-          releaseBody: ${{ steps.changelog.outputs.body }}
+          releaseBody: ${{ steps.changelog.outputs.body }} # 从 changelog 步骤中获取 body 变量内容
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
