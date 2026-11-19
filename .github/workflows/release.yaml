@@ -43,8 +43,6 @@ jobs:
             cat "$RUNNER_TEMP/changelog.md"
             echo 'CHANGELOG_EOF'
           } >> "$GITHUB_OUTPUT"
-          # 查看 output 中的 body 内容
-          echo "Body is: [${{ steps.changelog.outputs.body }}]" >> "$GITHUB_OUTPUT"
 
       - uses: tauri-apps/tauri-action@v1
         env:
