@@ -35,10 +35,16 @@ jobs:
         shell: bash
         run: |
           node scripts/extract-changelog.mjs "${{ github.ref_name }}" > "$RUNNER_TEMP/changelog.md"
-          echo "===== changelog.md content start ====="
+          # 仍然打印出来方便在日志里核对
           cat "$RUNNER_TEMP/changelog.md"
-          echo "===== changelog.md content end ====="
-          wc -c "$RUNNER_TEMP/changelog.md"
+          # 文件内容原样写入 output（多行安全）
+          {
+            echo 'body<<CHANGELOG_EOF'
+            cat "$RUNNER_TEMP/changelog.md"
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+          # 查看 output 中的 body 内容
+          echo "Body is: [${{ steps.changelog.outputs.body }}]" >> "$GITHUB_OUTPUT"
 
       - uses: tauri-apps/tauri-action@v1
         env:
@@ -48,7 +54,7 @@ jobs:
         with:
           releaseName: "Release ${{ github.ref_name }}"
           tagName: ${{ github.ref_name }}
-          body_path: ${{ runner.temp }}/changelog.md # 关键：直接指向文件
+          releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
