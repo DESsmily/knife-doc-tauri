@@ -41,7 +41,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       
       - name: Debug changelog output
-        run: echo "Body is: [${{ steps.changelog.outputs.body }}]"
+        run: | 
+          echo "Body is: [${{ steps.changelog.outputs.body }}]"
 
       - uses: tauri-apps/tauri-action@v1
         env:
