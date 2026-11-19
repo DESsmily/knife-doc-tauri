@@ -120,6 +120,15 @@ export class DocumentParser {
     return this.apis.length
   }
 
+  /**
+   * 原始文档 JSON。
+   * 导出「接口 JSON」时直接使用原始文档，避免二次序列化丢失 x- 扩展字段与
+   * 其它本项目未建模的内容。
+   */
+  get document(): Record<string, unknown> {
+    return this.rawDoc
+  }
+
   /** 获取接口详情（带缓存） */
   getDetail(apiId: string): ApiDetail | null {
     const cached = this.detailCache.get(apiId)

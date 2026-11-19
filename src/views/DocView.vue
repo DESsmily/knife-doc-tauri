@@ -15,22 +15,19 @@ import GlobalParamDialog from '@/components/doc/GlobalParamDialog.vue'
 import ModelDialog from '@/components/doc/ModelDialog.vue'
 import ModelsPanel from '@/components/doc/ModelsPanel.vue'
 import SampleTab from '@/components/doc/SampleTab.vue'
-import RequestEditor from '@/components/quick/RequestEditor.vue'
-import RequestTabs from '@/components/quick/RequestTabs.vue'
-import RequestTree from '@/components/quick/RequestTree.vue'
-import { apiDetailToQuickRequest } from '@/core/apiToQuick'
 import { copyText } from '@/core/http'
 import { useDocStore } from '@/stores/doc'
 import { useGlobalParamStore } from '@/stores/globalParam'
 import { useProjectStore } from '@/stores/project'
-import { useQuickRequestStore } from '@/stores/quickRequest'
+
+// 显式声明组件名，供 App.vue 的 keep-alive include 匹配
+defineOptions({ name: 'DocView' })
 
 const route = useRoute()
 const router = useRouter()
 const docStore = useDocStore()
 const projectStore = useProjectStore()
 const globalParamStore = useGlobalParamStore()
-const quickStore = useQuickRequestStore()
 
 const activeTab = ref<'doc' | 'debug' | 'sample'>('doc')
 const globalDialogVisible = ref(false)
@@ -42,31 +39,6 @@ const sidebarCollapsed = ref(false)
 
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
-}
-
-/** 视图模式：文档视图 / 快捷请求视图 */
-const viewMode = ref<'doc' | 'quick'>('doc')
-
-/** 进入快捷请求视图：把当前接口派生为快捷请求并打开 */
-function enterQuickView() {
-  if (!detail.value) {
-    message.warning('请先选择左侧的接口')
-    return
-  }
-  // 按「方法 + 地址」去重，已存在则复用，否则新建
-  const snapshot = apiDetailToQuickRequest(detail.value, baseUrl.value, globalParamStore.enabled)
-  const target = `${detail.value.method} ${snapshot.url}`
-  const existing = quickStore.requests.find((item) => `${item.method} ${item.url}` === target)
-  if (existing) {
-    quickStore.setActive(existing.id)
-  } else {
-    quickStore.addRequest(snapshot)
-  }
-  viewMode.value = 'quick'
-}
-
-function backToDocView() {
-  viewMode.value = 'doc'
 }
 
 const project = computed(() => projectStore.projects.find((item) => item.id === docStore.projectId) ?? null)
@@ -191,16 +163,6 @@ watch(activeTab, () => resetContentScroll())
         </el-button>
       </el-tooltip>
 
-      <el-button
-        link
-        class="doc-header__quick"
-        :class="{ 'is-active': viewMode === 'quick' }"
-        @click="viewMode === 'quick' ? backToDocView() : enterQuickView()"
-      >
-        <el-icon><Lightning /></el-icon>
-        <span>{{ viewMode === 'quick' ? '返回文档' : '快捷请求' }}</span>
-      </el-button>
-
       <div class="doc-header__title">
         <h1>{{ project?.name ?? '接口文档' }}</h1>
         <button type="button" class="doc-header__url kd-mono" title="点击复制" @click="handleCopyBase">
@@ -267,83 +229,71 @@ watch(activeTab, () => resetContentScroll())
       />
 
       <div class="doc-body">
-        <transition name="kd-slide" mode="out-in">
-          <!-- 文档视图 -->
-          <div v-if="viewMode === 'doc'" key="doc" class="doc-view">
-            <!-- 面包屑：点击模块 / 接口标签可定位并展开左侧列表中的对应位置 -->
-            <DocBreadcrumb :project-name="project?.name ?? '接口文档'" />
+        <div class="doc-view">
+          <!-- 面包屑：点击模块 / 接口标签可定位并展开左侧列表中的对应位置 -->
+          <DocBreadcrumb :project-name="project?.name ?? '接口文档'" />
 
-            <!-- 接口标签栏：只存内存，刷新后仅保留当前访问的接口标签 -->
-            <DocTabs />
+          <!-- 接口标签栏：只存内存，刷新后仅保留当前访问的接口标签 -->
+          <DocTabs />
 
-            <main ref="contentRef" class="doc-content kd-scroll">
-              <!-- 接口面板 -->
-              <template v-if="docStore.activePanel === 'api'">
-                <template v-if="detail">
-                  <div class="api-bar">
-                    <div class="api-bar__left">
-                      <MethodTag :method="detail.method" size="large" />
-                      <span class="api-bar__path kd-mono">{{ detail.fullPath }}</span>
-                      <span class="api-bar__summary">{{ detail.summary }}</span>
-                    </div>
-
-                    <el-tabs v-model="activeTab" class="api-tabs">
-                      <el-tab-pane name="doc" label="文档" />
-                      <el-tab-pane name="debug" label="调试" />
-                      <el-tab-pane name="sample" label="示例" />
-                    </el-tabs>
+          <main ref="contentRef" class="doc-content kd-scroll">
+            <!-- 接口面板 -->
+            <template v-if="docStore.activePanel === 'api'">
+              <template v-if="detail">
+                <div class="api-bar">
+                  <div class="api-bar__left">
+                    <MethodTag :method="detail.method" size="large" />
+                    <span class="api-bar__path kd-mono">{{ detail.fullPath }}</span>
+                    <span class="api-bar__summary">{{ detail.summary }}</span>
                   </div>
 
-                  <div class="api-panel">
-                    <DocumentTab
-                      v-if="activeTab === 'doc'"
-                      :detail="detail"
-                      :global-params="globalParamStore.enabled"
-                      :base-url="baseUrl"
-                      :models="docStore.models"
-                      @open-model="openModel"
-                    />
-                    <DebugTab
-                      v-else-if="activeTab === 'debug'"
-                      :detail="detail"
-                      :global-params="globalParamStore.list"
-                      :base-url="baseUrl"
-                    />
-                    <SampleTab
-                      v-else
-                      :detail="detail"
-                      :base-url="baseUrl"
-                      :models="docStore.models"
-                      :global-params="globalParamStore.enabled"
-                    />
-                  </div>
-                </template>
+                  <el-tabs v-model="activeTab" class="api-tabs">
+                    <el-tab-pane name="doc" label="文档" />
+                    <el-tab-pane name="debug" label="调试" />
+                    <el-tab-pane name="sample" label="示例" />
+                  </el-tabs>
+                </div>
 
-                <EmptyState
-                  v-else
-                  icon="Document"
-                  title="请选择左侧的接口"
-                  description="从左侧接口列表中选择一个接口，即可查看文档、发起调试请求并生成示例代码。"
-                />
+                <div class="api-panel">
+                  <DocumentTab
+                    v-if="activeTab === 'doc'"
+                    :detail="detail"
+                    :global-params="globalParamStore.enabled"
+                    :base-url="baseUrl"
+                    :models="docStore.models"
+                    @open-model="openModel"
+                  />
+                  <DebugTab
+                    v-else-if="activeTab === 'debug'"
+                    :detail="detail"
+                    :global-params="globalParamStore.list"
+                    :base-url="baseUrl"
+                  />
+                  <SampleTab
+                    v-else
+                    :detail="detail"
+                    :base-url="baseUrl"
+                    :models="docStore.models"
+                    :global-params="globalParamStore.enabled"
+                  />
+                </div>
               </template>
 
-              <!-- 文档信息 -->
-              <DocInfoPanel v-else-if="docStore.activePanel === 'info'" />
+              <EmptyState
+                v-else
+                icon="Document"
+                title="请选择左侧的接口"
+                description="从左侧接口列表中选择一个接口，即可查看文档、发起调试请求并生成示例代码。"
+              />
+            </template>
 
-              <!-- 数据模型 -->
-              <ModelsPanel v-else @open-model="openModel" />
-            </main>
-          </div>
+            <!-- 文档信息 -->
+            <DocInfoPanel v-else-if="docStore.activePanel === 'info'" />
 
-          <!-- 快捷请求视图 -->
-          <div v-else key="quick" class="doc-quick-view">
-            <RequestTree />
-            <section class="doc-quick-view__content">
-              <RequestTabs />
-              <RequestEditor :request="quickStore.active" />
-            </section>
-          </div>
-        </transition>
+            <!-- 数据模型 -->
+            <ModelsPanel v-else @open-model="openModel" />
+          </main>
+        </div>
       </div>
     </div>
 
@@ -384,17 +334,6 @@ watch(activeTab, () => resetContentScroll())
 .doc-header__toggle {
   flex-shrink: 0;
   font-size: 17px;
-}
-
-.doc-header__quick {
-  flex-shrink: 0;
-  gap: 4px;
-  font-size: $font-sm;
-
-  &.is-active {
-    color: var(--kd-primary);
-    font-weight: 600;
-  }
 }
 
 .doc-header__title {
@@ -523,44 +462,13 @@ watch(activeTab, () => resetContentScroll())
   padding: 18px 24px 40px;
 }
 
-/* 文档视图 / 快捷请求视图：整页左右滑动切换 */
+/* 文档视图 */
 .doc-view {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-}
-
-.doc-quick-view {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-
-  &__content {
-    flex: 1;
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-}
-
-.kd-slide-enter-active,
-.kd-slide-leave-active {
-  transition: transform 0.26s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.26s ease;
-}
-
-.kd-slide-enter-from {
-  transform: translateX(36px);
-  opacity: 0;
-}
-
-.kd-slide-leave-to {
-  transform: translateX(-36px);
-  opacity: 0;
 }
 
 .api-bar {

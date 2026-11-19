@@ -6,7 +6,7 @@ import MethodTag from '@/components/common/MethodTag.vue'
 import { apiDetailToQuickRequest } from '@/core/apiToQuick'
 import { copyText } from '@/core/http'
 import { generateMarkdown, generateTypeTypes, type ScriptContext } from '@/core/scriptGenerator'
-import type { ApiSummary, DocGroup } from '@/core/types'
+import type { ApiSummary, ApiTagGroup, DocGroup } from '@/core/types'
 import { useDocStore } from '@/stores/doc'
 import { useGlobalParamStore } from '@/stores/globalParam'
 import { useProjectStore } from '@/stores/project'
@@ -161,30 +161,66 @@ interface MenuState {
   visible: boolean
   x: number
   y: number
+  /** 右键命中的接口（接口菜单） */
   api: ApiSummary | null
+  /** 右键命中的模块（模块菜单） */
+  tag: ApiTagGroup | null
 }
 
 const menuState = reactive<MenuState>({
   visible: false,
   x: 0,
   y: 0,
-  api: null
+  api: null,
+  tag: null
 })
 
-/** 打开右键菜单 */
-function openContextMenu(event: MouseEvent, api: ApiSummary) {
-  event.preventDefault()
-  event.stopPropagation()
+/** 右键菜单元素，用于渲染后按实际尺寸修正位置 */
+const menuRef = ref<HTMLElement | null>(null)
+
+/** 在鼠标位置打开菜单，并保证菜单不会溢出视口右 / 下边缘 */
+function openMenuAt(event: MouseEvent) {
   menuState.visible = true
   menuState.x = event.clientX
   menuState.y = event.clientY
+  void nextTick(() => {
+    const el = menuRef.value
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const margin = 8
+    if (menuState.x + rect.width + margin > window.innerWidth) {
+      menuState.x = Math.max(margin, window.innerWidth - rect.width - margin)
+    }
+    if (menuState.y + rect.height + margin > window.innerHeight) {
+      menuState.y = Math.max(margin, window.innerHeight - rect.height - margin)
+    }
+  })
+}
+
+/** 打开接口右键菜单 */
+function openContextMenu(event: MouseEvent, api: ApiSummary) {
+  event.preventDefault()
+  event.stopPropagation()
   menuState.api = api
+  menuState.tag = null
+  openMenuAt(event)
+}
+
+/** 打开模块（接口分类）右键菜单 */
+function openTagContextMenu(event: MouseEvent, tag: ApiTagGroup) {
+  event.preventDefault()
+  event.stopPropagation()
+  menuState.api = null
+  // 取未经过搜索过滤的完整分类：右键「复制为 Markdown」始终复制该分类下的全部接口
+  menuState.tag = docStore.tagGroups.find((item) => item.name === tag.name) ?? tag
+  openMenuAt(event)
 }
 
 /** 关闭右键菜单 */
 function closeContextMenu() {
   menuState.visible = false
   menuState.api = null
+  menuState.tag = null
 }
 
 /** 复制接口路径 */
@@ -208,6 +244,41 @@ async function copyMarkdownFromMenu() {
   }
   const ok = await copyText(generateMarkdown(detail))
   message[ok ? 'success' : 'warning'](ok ? 'Markdown 已复制' : '复制失败')
+  closeContextMenu()
+}
+
+/** 接口之间的分隔：空两行，粘贴到文档后各接口区块互不粘连 */
+const MARKDOWN_BLOCK_GAP = '\n\n\n'
+
+/**
+ * 复制整个模块（接口分类）下所有接口的 Markdown。
+ * 逐个接口生成同一套 Markdown 文档，按分类内的接口顺序拼接，接口之间空两行。
+ */
+async function copyTagMarkdown() {
+  const tag = menuState.tag
+  if (!tag) return
+  const parser = docStore.parser
+  if (!parser) {
+    message.warning('当前分组文档尚未加载完成')
+    closeContextMenu()
+    return
+  }
+
+  const blocks: string[] = []
+  for (const api of tag.apis) {
+    const detail = parser.getDetail(api.id)
+    if (detail) blocks.push(generateMarkdown(detail))
+  }
+  if (blocks.length === 0) {
+    message.warning('该分类下没有可复制的接口')
+    closeContextMenu()
+    return
+  }
+
+  const ok = await copyText(blocks.join(MARKDOWN_BLOCK_GAP))
+  message[ok ? 'success' : 'warning'](
+    ok ? `已复制「${tag.name}」下 ${blocks.length} 个接口的 Markdown` : '复制失败'
+  )
   closeContextMenu()
 }
 
@@ -353,7 +424,12 @@ const totalGlobalCount = computed(() => globalParamStore.list.length)
           class="tag-block"
           :data-reveal="`tag:${tag.name}`"
         >
-          <button type="button" class="tag-head" @click="toggleTag(tag.name)">
+          <button
+            type="button"
+            class="tag-head"
+            @click="toggleTag(tag.name)"
+            @contextmenu="openTagContextMenu($event, tag)"
+          >
             <el-icon class="tag-head__arrow" :class="{ 'is-collapsed': isCollapsed(tag.name) }">
               <CaretBottom />
             </el-icon>
@@ -394,27 +470,40 @@ const totalGlobalCount = computed(() => globalParamStore.list.length)
     <teleport to="body">
       <div
         v-if="menuState.visible"
+        ref="menuRef"
         class="ctx-menu"
         :style="{ left: `${menuState.x}px`, top: `${menuState.y}px` }"
         @click.stop
         @contextmenu.prevent
       >
-        <button type="button" class="ctx-menu__item" @click="copyPathFromMenu">
-          <el-icon><CopyDocument /></el-icon>
-          <span>复制路径</span>
-        </button>
-        <button type="button" class="ctx-menu__item" @click="copyMarkdownFromMenu">
-          <el-icon><Tickets /></el-icon>
-          <span>复制为 Markdown</span>
-        </button>
-        <button type="button" class="ctx-menu__item" @click="copyTsExample">
-          <el-icon><DocumentCopy /></el-icon>
-          <span>复制 TS 示例</span>
-        </button>
-        <button type="button" class="ctx-menu__item" @click="addToQuickRequest">
-          <el-icon><Plus /></el-icon>
-          <span>添加到快捷请求</span>
-        </button>
+        <!-- 接口菜单 -->
+        <template v-if="menuState.api">
+          <button type="button" class="ctx-menu__item" @click="copyPathFromMenu">
+            <el-icon><CopyDocument /></el-icon>
+            <span>复制路径</span>
+          </button>
+          <button type="button" class="ctx-menu__item" @click="copyMarkdownFromMenu">
+            <el-icon><Tickets /></el-icon>
+            <span>复制为 Markdown</span>
+          </button>
+          <button type="button" class="ctx-menu__item" @click="copyTsExample">
+            <el-icon><DocumentCopy /></el-icon>
+            <span>复制 TS 示例</span>
+          </button>
+          <button type="button" class="ctx-menu__item" @click="addToQuickRequest">
+            <el-icon><Plus /></el-icon>
+            <span>添加到快捷请求</span>
+          </button>
+        </template>
+
+        <!-- 模块（分类）菜单：复制该分类下所有接口的 Markdown -->
+        <template v-else-if="menuState.tag">
+          <button type="button" class="ctx-menu__item" @click="copyTagMarkdown">
+            <el-icon><Tickets /></el-icon>
+            <span>复制为 Markdown</span>
+            <em class="ctx-menu__meta">{{ menuState.tag.apis.length }}</em>
+          </button>
+        </template>
       </div>
     </teleport>
 
@@ -720,6 +809,13 @@ const totalGlobalCount = computed(() => globalParamStore.list.length)
       background: var(--kd-primary-soft);
       color: var(--kd-primary);
     }
+  }
+
+  &__meta {
+    margin-left: auto;
+    font-size: 11px;
+    font-style: normal;
+    color: var(--kd-text-3);
   }
 }
 

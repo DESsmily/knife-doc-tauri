@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { message } from '@/core/message'
 
 import MarkdownText from '@/components/common/MarkdownText.vue'
 import MethodTag from '@/components/common/MethodTag.vue'
+import { exportJson } from '@/core/http'
+import { isTauri } from '@/core/tauri'
 import type { ApiSummary } from '@/core/types'
+import { safeFileName } from '@/core/utils'
 import { useDocStore } from '@/stores/doc'
 
 const docStore = useDocStore()
 
 const keyword = ref('')
+const downloading = ref(false)
 
 const info = computed(() => docStore.parser?.info ?? null)
 const group = computed(() => docStore.currentGroup)
@@ -34,19 +39,58 @@ const methodStats = computed(() => {
 function openApi(api: ApiSummary) {
   docStore.setActiveApi(api.id)
 }
+
+/**
+ * 下载当前分组的接口文档 JSON。
+ * 直接导出后端返回的原始 Swagger / OpenAPI 文档，便于离线留存或导入其它工具。
+ */
+async function downloadDocJson() {
+  const parser = docStore.parser
+  if (!parser) {
+    message.warning('当前分组文档尚未加载完成')
+    return
+  }
+  downloading.value = true
+  try {
+    const name = safeFileName(group.value?.name || info.value?.title || 'api-docs', 'api-docs')
+    const path = await exportJson(`${name}.json`, parser.document)
+    if (!path) return
+    message.success(isTauri ? `接口 JSON 已保存到 ${path}` : `接口 JSON 已下载（${name}.json）`)
+  } catch (error) {
+    message.error(`下载失败：${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    downloading.value = false
+  }
+}
 </script>
 
 <template>
   <div class="info-panel">
     <header class="info-head">
-      <h2>{{ info?.title || group?.title || '接口文档' }}</h2>
-      <div class="info-tags">
-        <el-tag v-if="info?.version" size="small" effect="plain">版本 {{ info.version }}</el-tag>
-        <el-tag size="small" effect="plain" type="success">
-          {{ docStore.parser?.specKind === 'swagger2' ? 'Swagger 2.0' : 'OpenAPI 3' }}
-        </el-tag>
-        <el-tag size="small" effect="plain" type="info">{{ docStore.apiCount }} 个接口</el-tag>
-        <el-tag size="small" effect="plain" type="warning">{{ docStore.tagGroups.length }} 个模块</el-tag>
+      <div class="info-head__main">
+        <h2>{{ info?.title || group?.title || '接口文档' }}</h2>
+        <div class="info-tags">
+          <el-tag v-if="info?.version" size="small" effect="plain">版本 {{ info.version }}</el-tag>
+          <el-tag size="small" effect="plain" type="success">
+            {{ docStore.parser?.specKind === 'swagger2' ? 'Swagger 2.0' : 'OpenAPI 3' }}
+          </el-tag>
+          <el-tag size="small" effect="plain" type="info">{{ docStore.apiCount }} 个接口</el-tag>
+          <el-tag size="small" effect="plain" type="warning">{{ docStore.tagGroups.length }} 个模块</el-tag>
+        </div>
+      </div>
+
+      <div class="info-head__actions">
+        <el-tooltip content="下载当前分组的接口文档 JSON" placement="bottom">
+          <el-button
+            size="small"
+            :loading="downloading"
+            :disabled="!docStore.parser"
+            @click="downloadDocJson"
+          >
+            <el-icon><Download /></el-icon>
+            <span>下载 JSON</span>
+          </el-button>
+        </el-tooltip>
       </div>
     </header>
 
@@ -153,6 +197,9 @@ function openApi(api: ApiSummary) {
 }
 
 .info-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--kd-border);
   margin-bottom: 18px;
@@ -162,6 +209,18 @@ function openApi(api: ApiSummary) {
     line-height: 1.35;
     margin-bottom: 10px;
   }
+}
+
+.info-head__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.info-head__actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .info-tags {

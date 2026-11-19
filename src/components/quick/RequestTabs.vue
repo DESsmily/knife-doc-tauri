@@ -5,13 +5,79 @@
  */
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useZIndex } from 'element-plus'
+import { ElMessageBox, useZIndex } from 'element-plus'
 
+import { message } from '@/core/message'
+import { flushStorage } from '@/core/storage'
 import { useQuickRequestStore } from '@/stores/quickRequest'
 import { methodColor } from '@/core/utils'
 import type { QuickRequest } from '@/core/types'
 
 const store = useQuickRequestStore()
+
+/* ---------- 关闭标签：未保存的草稿先询问 ---------- */
+
+/**
+ * 关闭前处理未保存的草稿：
+ *  - 没有未保存修改 → 直接关闭；
+ *  - 有未保存修改 → 弹框「保存并关闭 / 不保存 / 取消」，点右上角 × 或 ESC 视为取消关闭。
+ * 批量关闭（关闭其他 / 左侧 / 右侧 / 全部）只弹一次框，逐条保存后一起关闭。
+ */
+async function confirmClose(ids: string[], closeAction: () => void) {
+  const dirtyIds = ids.filter((id) => store.dirty.includes(id))
+  if (dirtyIds.length === 0) {
+    closeAction()
+    return
+  }
+  // 提示里优先用草稿名称：用户刚改过的名字更符合「这一个请求」的直觉
+  const names = dirtyIds.map(
+    (id) => store.drafts[id]?.name ?? store.requests.find((item) => item.id === id)?.name ?? '未命名请求'
+  )
+  const tip =
+    dirtyIds.length === 1
+      ? `「${names[0]}」有未保存的修改，是否保存后关闭？`
+      : `有 ${dirtyIds.length} 个请求未保存（${names.slice(0, 3).join('、')}${names.length > 3 ? ' 等' : ''}），是否保存后关闭？`
+  try {
+    await ElMessageBox.confirm(tip, '关闭标签', {
+      confirmButtonText: '保存并关闭',
+      cancelButtonText: '不保存',
+      distinguishCancelAndClose: true,
+      type: 'warning'
+    })
+    for (const id of dirtyIds) store.saveDraft(id)
+    // 立刻落盘并反馈失败，避免只依赖 400ms 防抖写入
+    void flushStorage().then((ok) => {
+      if (!ok) message.warning('保存失败，请检查安装目录是否可写')
+    })
+    closeAction()
+  } catch (action) {
+    if (action !== 'cancel') return
+    for (const id of dirtyIds) store.discardDraft(id)
+    closeAction()
+  }
+}
+
+function closeTab(id: string) {
+  void confirmClose([id], () => store.close(id))
+}
+
+function closeOtherTabs(id: string) {
+  void confirmClose(
+    store.opened.filter((item) => item !== id),
+    () => store.closeOthers(id)
+  )
+}
+
+function closeSideTabs(id: string, side: 'left' | 'right') {
+  const anchor = store.opened.indexOf(id)
+  if (anchor < 0) return
+  const ids = store.opened.filter((_, index) => (side === 'left' ? index < anchor : index > anchor))
+  void confirmClose(ids, () => store.closeSide(id, side))
+}
+
+function closeAllTabs() {
+  void confirmClose([...store.opened], () => store.closeAll())
+}
 
 const scrollEl = ref<HTMLElement | null>(null)
 const hasTabs = computed(() => store.tabs.length > 0)
@@ -48,11 +114,11 @@ const menuItems = computed(() => {
     menu.value = null
   }
   return [
-    { label: '关闭', disabled: false, onClick: run(() => store.close(id)) },
-    { label: '关闭其他', disabled: total < 2, onClick: run(() => store.closeOthers(id)) },
-    { label: '关闭左侧', disabled: index < 1, onClick: run(() => store.closeSide(id, 'left')) },
-    { label: '关闭右侧', disabled: index < 0 || index >= total - 1, onClick: run(() => store.closeSide(id, 'right')) },
-    { label: '关闭全部', disabled: total < 2, onClick: run(() => store.closeAll()) }
+    { label: '关闭', disabled: false, onClick: run(() => closeTab(id)) },
+    { label: '关闭其他', disabled: total < 2, onClick: run(() => closeOtherTabs(id)) },
+    { label: '关闭左侧', disabled: index < 1, onClick: run(() => closeSideTabs(id, 'left')) },
+    { label: '关闭右侧', disabled: index < 0 || index >= total - 1, onClick: run(() => closeSideTabs(id, 'right')) },
+    { label: '关闭全部', disabled: total < 2, onClick: run(() => closeAllTabs()) }
   ]
 })
 
@@ -117,14 +183,14 @@ watch(
         :title="`${request.method} ${request.url || '未填写地址'}`"
         @click="store.setActive(request.id)"
         @contextmenu.prevent="openMenu(request, $event)"
-        @mouseup.middle="store.close(request.id)"
+        @mouseup.middle="closeTab(request.id)"
       >
         <el-icon class="req-tab__icon" :style="{ color: methodColor(request.method) }">
           <Lightning />
         </el-icon>
         <span class="req-tab__name kd-ellipsis">{{ request.name }}</span>
         <span v-if="store.dirty.includes(request.id)" class="req-tab__dot" title="有未保存的修改"></span>
-        <button type="button" class="req-tab__close" title="关闭" @click.stop="store.close(request.id)">
+        <button type="button" class="req-tab__close" title="关闭" @click.stop="closeTab(request.id)">
           <el-icon><Close /></el-icon>
         </button>
       </div>
@@ -141,8 +207,8 @@ watch(
         </button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item @click="store.closeOthers(store.activeId)">关闭其他</el-dropdown-item>
-            <el-dropdown-item @click="store.closeAll()">关闭全部</el-dropdown-item>
+            <el-dropdown-item @click="closeOtherTabs(store.activeId)">关闭其他</el-dropdown-item>
+            <el-dropdown-item @click="closeAllTabs()">关闭全部</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>

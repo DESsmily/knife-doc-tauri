@@ -12,6 +12,9 @@ import { useRoute } from 'vue-router'
 import ProjectListView from '@/views/ProjectListView.vue'
 import QuickRequestView from '@/views/QuickRequestView.vue'
 
+// 显式声明组件名，供 App.vue 的 keep-alive include 匹配
+defineOptions({ name: 'HomeView' })
+
 const route = useRoute()
 
 /** /quick 对应快捷请求，其余（含 /）为项目管理 */
@@ -23,10 +26,15 @@ const currentComponent = computed(() => (isQuick.value ? QuickRequestView : Proj
 <template>
   <div class="home">
     <main class="home__content">
+      <!-- 两个面板各自缓存：切到快捷请求再切回来时，列表的搜索 / 滚动 / 视图模式都还在 -->
       <transition name="kd-slide">
-        <div :key="isQuick ? 'quick' : 'projects'" class="home__panel">
-          <component :is="currentComponent" />
-        </div>
+        <keep-alive>
+          <component
+            :is="currentComponent"
+            :key="isQuick ? 'quick' : 'projects'"
+            class="home__panel"
+          />
+        </keep-alive>
       </transition>
     </main>
   </div>

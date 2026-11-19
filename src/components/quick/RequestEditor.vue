@@ -3,7 +3,8 @@
  * 快捷请求编辑器。
  *
  * 布局对齐 Apifox：地址行（方法 + URL + 发送 + 保存）在上，请求名称在下。
- * 编辑只标记「未保存」，落盘由保存按钮 / Ctrl+S 触发；上下两区用 flex 分配高度，中间可拖动。
+ * 编辑作用于一份深拷贝草稿，不会实时写回 store —— 左侧列表与标签栏保持已保存的内容；
+ * 只有点「保存」/ Ctrl+S 才把草稿写回并落盘，未保存就关闭标签会提示是否保存。
  */
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
@@ -29,6 +30,9 @@ const props = defineProps<{ request: QuickRequest | null }>()
 
 const store = useQuickRequestStore()
 const appStore = useAppStore()
+
+/** 编辑草稿：所有表单绑定都落在这份副本上，保存前不影响列表 */
+const draft = ref<QuickRequest | null>(null)
 
 const kvBody = ref<InstanceType<typeof KvTable> | null>(null)
 
@@ -83,22 +87,25 @@ function startDrag(event: PointerEvent) {
 onBeforeUnmount(() => endDrag?.())
 
 /* ------------------------------------------------------------------ */
-/* 保存：只由「保存」按钮 / Ctrl+S 触发，编辑过程仅标记未保存           */
+/* 草稿与保存：编辑只改草稿，点保存 / Ctrl+S 才写回 store                */
 /* ------------------------------------------------------------------ */
 
-const isDirty = computed(() => (props.request ? store.dirty.includes(props.request.id) : false))
+const isDirty = computed(() => (draft.value ? store.dirty.includes(draft.value.id) : false))
 
 function markUnsaved() {
-  const request = props.request
-  if (request) store.markDirty(request.id)
+  if (draft.value) store.markDirty(draft.value.id)
 }
 
 async function handleSave() {
-  const request = props.request
-  if (!request) return
-  request.updatedAt = Date.now()
-  store.clearDirty(request.id)
-  store.persist()
+  const current = draft.value
+  if (!current) return
+  const id = current.id
+  if (!store.saveDraft(id)) {
+    message.warning('保存失败：请求可能已被删除')
+    return
+  }
+  // 保存后 store 里已是新内容，重新取一份干净的草稿继续编辑
+  draft.value = store.ensureDraft(id)
   const ok = await flushStorage()
   message[ok ? 'success' : 'warning'](ok ? '已保存' : '保存失败，请检查安装目录是否可写')
 }
@@ -116,17 +123,17 @@ const BODY_MODES: { value: QuickBody['mode']; label: string; hint: string }[] = 
 ]
 
 const isTextBody = computed(() => {
-  const mode = props.request?.body.mode
+  const mode = draft.value?.body.mode
   return mode === 'json' || mode === 'raw'
 })
 
 const jsonInvalid = computed(() => {
-  const body = props.request?.body
+  const body = draft.value?.body
   return body?.mode === 'json' && Boolean(body.text.trim()) && safeParse(body.text) === null
 })
 
 function formatBody() {
-  const body = props.request?.body
+  const body = draft.value?.body
   if (!body) return
   const parsed = safeParse(body.text)
   if (parsed === null) {
@@ -154,7 +161,7 @@ const TIMEOUT_OPTIONS = [
 ]
 
 async function handleSend() {
-  const request = props.request
+  const request = draft.value
   if (!request) return
 
   const check = validateQuickRequest(request)
@@ -173,7 +180,7 @@ async function handleSend() {
     const result = await sendDebugRequest(payload)
     response.value = result
     if (result.error) message.error(result.error)
-    // 只记时间戳，落盘仍然交给「保存」
+    // 只更新时间戳（留在草稿里），落盘仍然交给「保存」
     request.lastSentAt = Date.now()
   } finally {
     sending.value = false
@@ -181,15 +188,15 @@ async function handleSend() {
 }
 
 async function copyUrl() {
-  if (!props.request) return
-  const ok = await copyText(props.request.url)
+  if (!draft.value) return
+  const ok = await copyText(draft.value.url)
   message[ok ? 'success' : 'warning'](ok ? '地址已复制' : '复制失败')
 }
 
 /** 保存响应：桌面端走原生另存为对话框 */
 async function saveResponse(content: string) {
   const ext = response.value && safeParse(response.value.body) !== null ? 'json' : 'txt'
-  const name = `${(props.request?.name ?? 'response').replace(/[\\/:*?"<>|]/g, '_')}.${ext}`
+  const name = `${(draft.value?.name ?? 'response').replace(/[\\/:*?"<>|]/g, '_')}.${ext}`
   const path = await saveTextFile(name, content)
   if (path) message.success(`已保存到 ${path}`)
 }
@@ -206,27 +213,29 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 
-/** 切换请求时清掉上一次的响应与文件选择 */
+/** 切换请求时换成对应草稿，并清掉上一次的响应与文件选择 */
 watch(
   () => props.request?.id,
   () => {
+    draft.value = props.request ? store.ensureDraft(props.request.id) : null
     response.value = null
     sent.value = null
     respOpen.value = false
     activeTab.value = 'headers'
     kvBody.value?.clearAll()
-  }
+  },
+  { immediate: true }
 )
 </script>
 
 <template>
   <div class="req-editor" tabindex="-1" @keydown="onKeydown">
-    <template v-if="request">
+    <template v-if="draft">
       <div class="editor-url">
-        <el-select v-model="request.method" class="editor-url__method" @change="markUnsaved">
+        <el-select v-model="draft.method" class="editor-url__method" @change="markUnsaved">
           <template #label>
-            <span class="method-chip" :style="{ '--method-color': methodColor(request.method) }">
-              {{ request.method }}
+            <span class="method-chip" :style="{ '--method-color': methodColor(draft.method) }">
+              {{ draft.method }}
             </span>
           </template>
           <el-option v-for="method in QUICK_METHODS" :key="method" :label="method" :value="method">
@@ -234,7 +243,7 @@ watch(
           </el-option>
         </el-select>
         <el-input
-          v-model="request.url"
+          v-model="draft.url"
           class="editor-url__input kd-mono"
           placeholder="http://127.0.0.1:9999/api/example"
           spellcheck="false"
@@ -250,19 +259,19 @@ watch(
           <el-icon v-if="!sending"><Promotion /></el-icon>
           <span>{{ sending ? '请求中' : '发送' }}</span>
         </el-button>
-        <el-button class="editor-url__save" title="立即写入本地数据文件（Ctrl+S）" @click="handleSave">
+        <el-button class="editor-url__save" title="保存到本地数据文件（Ctrl+S）" @click="handleSave">
           <el-icon><Checked /></el-icon>
           <span>保存</span>
         </el-button>
       </div>
 
       <div class="editor-title">
-        <el-input v-model="request.name" class="editor-title__name" placeholder="请求名称" @input="markUnsaved" />
+        <el-input v-model="draft.name" class="editor-title__name" placeholder="请求名称" @input="markUnsaved" />
         <span class="editor-title__state" :class="isDirty ? 'is-dirty' : 'is-saved'">
           <i class="editor-title__dot" />
           {{ isDirty ? '未保存' : '已保存' }}
         </span>
-        <span class="editor-title__time">更新于 {{ formatTime(request.updatedAt) }}</span>
+        <span class="editor-title__time">更新于 {{ formatTime(draft.updatedAt) }}</span>
       </div>
 
       <div ref="splitEl" class="editor-split">
@@ -271,19 +280,19 @@ watch(
             <el-tab-pane name="headers">
               <template #label>
                 Headers
-                <em v-if="filledCount(request.headers)" class="tab-count">{{ filledCount(request.headers) }}</em>
+                <em v-if="filledCount(draft.headers)" class="tab-count">{{ filledCount(draft.headers) }}</em>
               </template>
             </el-tab-pane>
             <el-tab-pane name="params">
               <template #label>
                 Params
-                <em v-if="filledCount(request.params)" class="tab-count">{{ filledCount(request.params) }}</em>
+                <em v-if="filledCount(draft.params)" class="tab-count">{{ filledCount(draft.params) }}</em>
               </template>
             </el-tab-pane>
             <el-tab-pane name="body">
               <template #label>
                 Body
-                <em v-if="request.body.mode !== 'none'" class="tab-count">●</em>
+                <em v-if="draft.body.mode !== 'none'" class="tab-count">●</em>
               </template>
             </el-tab-pane>
             <el-tab-pane name="auth" label="Auth" />
@@ -293,7 +302,7 @@ watch(
           <div class="editor-panels__body kd-scroll">
             <KvTable
               v-if="activeTab === 'headers'"
-              :rows="request.headers"
+              :rows="draft.headers"
               name-label="Header"
               value-label="值"
               name-placeholder="Header 名称"
@@ -305,7 +314,7 @@ watch(
 
             <KvTable
               v-else-if="activeTab === 'params'"
-              :rows="request.params"
+              :rows="draft.params"
               name-placeholder="参数名"
               value-placeholder="参数值"
               empty-text="没有 Query 参数"
@@ -319,9 +328,9 @@ watch(
                   :key="mode.value"
                   type="button"
                   class="body-modes__item"
-                  :class="{ 'is-active': request.body.mode === mode.value }"
+                  :class="{ 'is-active': draft.body.mode === mode.value }"
                   :title="mode.hint"
-                  @click="request.body.mode = mode.value; markUnsaved()"
+                  @click="draft.body.mode = mode.value; markUnsaved()"
                 >
                   {{ mode.label }}
                 </button>
@@ -330,44 +339,44 @@ watch(
               <div v-if="isTextBody" class="body-text">
                 <div class="body-text__tools">
                   <el-input
-                    v-if="request.body.mode === 'raw'"
-                    v-model="request.body.contentType"
+                    v-if="draft.body.mode === 'raw'"
+                    v-model="draft.body.contentType"
                     size="small"
                     class="body-text__type"
                     placeholder="Content-Type，如 text/plain"
                     @input="markUnsaved"
                   />
-                  <el-button v-if="request.body.mode === 'json'" link size="small" @click="formatBody">
+                  <el-button v-if="draft.body.mode === 'json'" link size="small" @click="formatBody">
                     <el-icon><MagicStick /></el-icon>
                     <span>格式化 JSON</span>
                   </el-button>
                   <span v-if="jsonInvalid" class="body-text__warn">不是合法 JSON，将按文本原样发送</span>
                 </div>
                 <el-input
-                  v-model="request.body.text"
+                  v-model="draft.body.text"
                   type="textarea"
                   :rows="9"
                   class="kd-mono body-text__area"
-                  :placeholder="request.body.mode === 'json' ? '{ &quot;key&quot;: &quot;value&quot; }' : '原样发送的文本'"
+                  :placeholder="draft.body.mode === 'json' ? '{ &quot;key&quot;: &quot;value&quot; }' : '原样发送的文本'"
                   spellcheck="false"
                   resize="vertical"
                   @input="markUnsaved"
                 />
               </div>
 
-              <template v-else-if="request.body.mode === 'form' || request.body.mode === 'urlencoded'">
+              <template v-else-if="draft.body.mode === 'form' || draft.body.mode === 'urlencoded'">
                 <p class="body-hint">
                   {{
-                    request.body.mode === 'form'
+                    draft.body.mode === 'form'
                       ? '将「类型」选为「文件」后该行变成文件选择；文件本体只存在于本次会话，重新打开请求需要再选一次。'
                       : '字段会按 application/x-www-form-urlencoded 编码进请求体。'
                   }}
                 </p>
                 <KvTable
                   ref="kvBody"
-                  v-model:file-fields="request.body.fileFields"
-                  :rows="request.body.fields"
-                  :allow-file="request.body.mode === 'form'"
+                  v-model:file-fields="draft.body.fileFields"
+                  :rows="draft.body.fields"
+                  :allow-file="draft.body.mode === 'form'"
                   name-placeholder="字段名"
                   value-placeholder="字段值"
                   empty-text="没有表单字段"
@@ -381,7 +390,7 @@ watch(
             <div v-else-if="activeTab === 'auth'" class="auth-form">
               <el-form label-width="92px" label-position="left">
                 <el-form-item label="类型">
-                  <el-radio-group v-model="request.auth.type" @change="markUnsaved">
+                  <el-radio-group v-model="draft.auth.type" @change="markUnsaved">
                     <el-radio-button value="none">无</el-radio-button>
                     <el-radio-button value="bearer">Bearer</el-radio-button>
                     <el-radio-button value="basic">Basic</el-radio-button>
@@ -389,36 +398,36 @@ watch(
                   </el-radio-group>
                 </el-form-item>
 
-                <el-form-item v-if="request.auth.type === 'bearer'" label="令牌">
-                  <el-input v-model="request.auth.token" class="kd-mono" placeholder="eyJhbGciOi..." @input="markUnsaved" />
+                <el-form-item v-if="draft.auth.type === 'bearer'" label="令牌">
+                  <el-input v-model="draft.auth.token" class="kd-mono" placeholder="eyJhbGciOi..." @input="markUnsaved" />
                   <p class="form-tip">未写 Bearer 前缀时会自动补齐。</p>
                 </el-form-item>
 
-                <template v-else-if="request.auth.type === 'basic'">
+                <template v-else-if="draft.auth.type === 'basic'">
                   <el-form-item label="用户名">
-                    <el-input v-model="request.auth.username" @input="markUnsaved" />
+                    <el-input v-model="draft.auth.username" @input="markUnsaved" />
                   </el-form-item>
                   <el-form-item label="密码">
-                    <el-input v-model="request.auth.password" type="password" show-password @input="markUnsaved" />
+                    <el-input v-model="draft.auth.password" type="password" show-password @input="markUnsaved" />
                   </el-form-item>
                 </template>
 
-                <template v-else-if="request.auth.type === 'apikey'">
+                <template v-else-if="draft.auth.type === 'apikey'">
                   <el-form-item label="Key">
-                    <el-input v-model="request.auth.keyName" class="kd-mono" placeholder="Authorization" @input="markUnsaved" />
+                    <el-input v-model="draft.auth.keyName" class="kd-mono" placeholder="Authorization" @input="markUnsaved" />
                   </el-form-item>
                   <el-form-item label="Value">
-                    <el-input v-model="request.auth.keyValue" class="kd-mono" @input="markUnsaved" />
+                    <el-input v-model="draft.auth.keyValue" class="kd-mono" @input="markUnsaved" />
                   </el-form-item>
                   <el-form-item label="添加到">
-                    <el-radio-group v-model="request.auth.keyIn" @change="markUnsaved">
+                    <el-radio-group v-model="draft.auth.keyIn" @change="markUnsaved">
                       <el-radio-button value="header">Header</el-radio-button>
                       <el-radio-button value="query">Query</el-radio-button>
                     </el-radio-group>
                   </el-form-item>
                 </template>
 
-                <p v-else-if="request.auth.type === 'none'" class="form-tip">
+                <p v-else-if="draft.auth.type === 'none'" class="form-tip">
                   不附带任何鉴权信息；临时调试用的头可以直接加在 Headers。
                 </p>
               </el-form>
@@ -427,16 +436,16 @@ watch(
             <div v-else class="settings-form">
               <el-form label-width="112px" label-position="left">
                 <el-form-item label="请求超时">
-                  <el-select v-model="request.timeout" style="width: 150px" @change="markUnsaved">
+                  <el-select v-model="draft.timeout" style="width: 150px" @change="markUnsaved">
                     <el-option v-for="item in TIMEOUT_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
                   </el-select>
-                  <el-button link type="primary" size="small" @click="request.timeout = appStore.settings.requestTimeout; markUnsaved()">
+                  <el-button link type="primary" size="small" @click="draft.timeout = appStore.settings.requestTimeout; markUnsaved()">
                     用全局默认（{{ formatDuration(appStore.settings.requestTimeout) }}）
                   </el-button>
                 </el-form-item>
                 <el-form-item label="备注">
                   <el-input
-                    v-model="request.remark"
+                    v-model="draft.remark"
                     type="textarea"
                     :rows="6"
                     placeholder="写下这个接口的注意事项，仅保存在本地"
@@ -444,7 +453,7 @@ watch(
                   />
                 </el-form-item>
                 <el-form-item label="最近发送">
-                  <span class="kd-text-2">{{ request.lastSentAt ? formatTime(request.lastSentAt) : '从未发送' }}</span>
+                  <span class="kd-text-2">{{ draft.lastSentAt ? formatTime(draft.lastSentAt) : '从未发送' }}</span>
                 </el-form-item>
               </el-form>
             </div>
@@ -464,7 +473,7 @@ watch(
         <ResponsePanel
           :response="response"
           :sending="sending"
-          :download-name="request.name"
+          :download-name="draft.name"
           :sent="sent"
           :collapsed="!respOpen"
           :style="respStyle"

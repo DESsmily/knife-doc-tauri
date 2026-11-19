@@ -43,6 +43,7 @@ window.addEventListener('contextmenu', (event) => event.preventDefault())
  * 生产环境下禁用浏览器 / WebView 的刷新类与查找类快捷键。
  *
  * 桌面客户端中 Ctrl+R / Ctrl+Shift+R / F5 会触发 WebView 整页刷新，丢失当前
+ * 桌面端禁用ctrl+p 打印功能
  * 请求状态与已加载的文档，属于无效操作，应当屏蔽。Ctrl+F 会触发浏览器原生
  * 查找，屏蔽后改为唤起本应用的自定义页面搜索框。开发调试环境保留这些快捷键，
  * 以便在浏览器预览或 tauri dev 时排查问题。
@@ -59,8 +60,9 @@ if (import.meta.env.PROD) {
         return
       }
       const mod = event.ctrlKey || event.metaKey
+      const keys = ['r', 'p']
       // Ctrl/Cmd + R：普通刷新；按住 Shift 时即强制刷新（Ctrl+Shift+R）
-      if (mod && event.key.toLowerCase() === 'r') {
+      if (mod && keys.includes(event.key.toLowerCase())) {
         event.preventDefault()
         return
       }

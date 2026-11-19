@@ -54,7 +54,7 @@ function normalizeKv(raw: Partial<QuickKV> | undefined): QuickKV {
   }
 }
 
-/** 新建一条空白请求；folderId 为空表示挂在未分类下 */
+/** 新建一条空白请求；folderId 为空表示不归入任何分类（直接展示在一级） */
 export function createRequest(input: Partial<QuickRequest> = {}): QuickRequest {
   const now = Date.now()
   return {
@@ -119,6 +119,12 @@ export interface QuickTreeNode {
   requests: QuickRequest[]
 }
 
+/** 请求是否命中搜索关键词（名称 / 方法 / 地址） */
+function matchesKeyword(request: QuickRequest, keyword: string): boolean {
+  if (!keyword) return true
+  return `${request.name} ${request.method} ${request.url}`.toLowerCase().includes(keyword)
+}
+
 export const useQuickRequestStore = defineStore('quickRequest', {
   state: () => ({
     folders: [] as QuickFolder[],
@@ -126,7 +132,13 @@ export const useQuickRequestStore = defineStore('quickRequest', {
     activeId: '',
     /** 顶部标签栏里打开的请求 id，按打开顺序 */
     opened: [] as string[],
-    /** 有改动还没落盘的请求 id，只活在内存里，不持久化 */
+    /**
+     * 编辑草稿：key = 请求 id，value = 从已保存请求深拷贝出来的编辑副本。
+     * 编辑只改草稿，左侧列表与标签栏仍然显示已保存的内容；点「保存」才写回 requests。
+     * 仅存活于内存，不写入 data.json。
+     */
+    drafts: {} as Record<string, QuickRequest>,
+    /** 有草稿改动的请求 id，只活在内存里，不持久化 */
     dirty: [] as string[],
     /** 左侧树的过滤关键词 */
     keyword: '',
@@ -144,36 +156,36 @@ export const useQuickRequestStore = defineStore('quickRequest', {
         .map((id) => state.requests.find((item) => item.id === id))
         .filter((item): item is QuickRequest => Boolean(item))
     },
-    /** 未分类 + 各分类，用于左侧树 */
+    /**
+     * 分类列表，用于左侧树。
+     * 不再合成「未分类」节点：未归入分类的请求由 rootRequests 直接展示在一级。
+     */
     nodes(state): QuickTreeNode[] {
-      const list: QuickTreeNode[] = state.folders.map((folder) => ({
+      return state.folders.map((folder) => ({
         id: folder.id,
         name: folder.name,
         isFolder: true,
         requests: state.requests.filter((item) => item.folderId === folder.id)
       }))
-      list.unshift({
-        id: '',
-        name: '未分类',
-        isFolder: false,
-        requests: state.requests.filter((item) => !item.folderId)
-      })
-      return list
     },
-    /** 关键词过滤后的树（匹配请求名 / 地址 / 方法），空分类在过滤时隐藏 */
+    /** 未归入任何分类的请求（树的一级） */
+    rootRequests(state): QuickRequest[] {
+      return state.requests.filter((item) => !item.folderId)
+    },
+    /** 关键词过滤后的分类（无匹配请求的分类在过滤时隐藏） */
     matchedNodes(): QuickTreeNode[] {
       const keyword = this.keyword.trim().toLowerCase()
       return this.nodes
-        .map((node) => {
-          if (!keyword) return node
-          return {
-            ...node,
-            requests: node.requests.filter((item) =>
-              `${item.name} ${item.method} ${item.url}`.toLowerCase().includes(keyword)
-            )
-          }
-        })
+        .map((node) => ({
+          ...node,
+          requests: node.requests.filter((item) => matchesKeyword(item, keyword))
+        }))
         .filter((node) => keyword === '' || node.requests.length > 0)
+    },
+    /** 关键词过滤后的一级请求 */
+    matchedRootRequests(): QuickRequest[] {
+      const keyword = this.keyword.trim().toLowerCase()
+      return this.rootRequests.filter((item) => matchesKeyword(item, keyword))
     },
     total(state): number {
       return state.requests.length
@@ -206,20 +218,22 @@ export const useQuickRequestStore = defineStore('quickRequest', {
       if (this.requests.some((item) => item.id === id)) this.setActive(id)
     },
 
-    /** 关闭标签；未保存的改动仍然留在数据里，只是不再显示在标签栏 */
+    /** 关闭标签：未保存的草稿一并丢弃（需要保存时由界面先调用 saveDraft） */
     close(id: string) {
       const index = this.opened.indexOf(id)
       if (index < 0) return
       this.opened.splice(index, 1)
-      this.dirty = this.dirty.filter((item) => item !== id)
+      this.discardDraft(id)
       if (this.activeId === id) this.activeId = this.opened[Math.min(index, this.opened.length - 1)] ?? ''
       this.persist()
     },
 
     closeOthers(id: string) {
       if (!this.opened.includes(id)) return
+      for (const tabId of this.opened) {
+        if (tabId !== id) this.discardDraft(tabId)
+      }
       this.opened = [id]
-      this.dirty = this.dirty.filter((item) => item === id)
       this.activeId = id
       this.persist()
     },
@@ -228,14 +242,18 @@ export const useQuickRequestStore = defineStore('quickRequest', {
     closeSide(id: string, side: 'left' | 'right') {
       const anchor = this.opened.indexOf(id)
       if (anchor < 0) return
-      this.opened = this.opened.filter((_, index) => (side === 'left' ? index >= anchor : index <= anchor))
-      this.dirty = this.dirty.filter((item) => this.opened.includes(item))
+      const kept = this.opened.filter((_, index) => (side === 'left' ? index >= anchor : index <= anchor))
+      for (const tabId of this.opened) {
+        if (!kept.includes(tabId)) this.discardDraft(tabId)
+      }
+      this.opened = kept
       if (!this.opened.includes(this.activeId)) this.activeId = id
       this.persist()
     },
 
     closeAll() {
       this.opened = []
+      this.drafts = {}
       this.dirty = []
       this.activeId = ''
       this.persist()
@@ -245,8 +263,41 @@ export const useQuickRequestStore = defineStore('quickRequest', {
       if (!this.dirty.includes(id)) this.dirty.push(id)
     },
 
-    clearDirty(id: string) {
+    /**
+     * 取请求的编辑草稿；没有则以已保存内容为蓝本深拷贝一份。
+     * 草稿与 requests 里的对象完全独立，编辑草稿不会影响左侧列表 / 标签栏。
+     */
+    ensureDraft(id: string): QuickRequest | null {
+      const request = this.requests.find((item) => item.id === id)
+      if (!request) return null
+      const existing = this.drafts[id]
+      if (existing) return existing
+      const draft = JSON.parse(JSON.stringify(request)) as QuickRequest
+      this.drafts[id] = draft
+      return draft
+    },
+
+    /** 丢弃草稿：取消修改 / 关闭标签且不保存时调用 */
+    discardDraft(id: string) {
+      delete this.drafts[id]
       this.dirty = this.dirty.filter((item) => item !== id)
+    },
+
+    /**
+     * 保存草稿：把草稿内容写回请求列表并落盘。
+     * folderId 由列表侧维护（拖拽移动、删除分类），保存时不覆盖，
+     * 避免「开着标签时把请求拖到别的分类，保存后又跳回原分类」。
+     */
+    saveDraft(id: string): boolean {
+      const draft = this.drafts[id]
+      const request = this.requests.find((item) => item.id === id)
+      if (!draft || !request) return false
+      const patch: Partial<QuickRequest> = { ...draft }
+      delete patch.folderId
+      Object.assign(request, patch, { updatedAt: Date.now() })
+      this.discardDraft(id)
+      this.persist()
+      return true
     },
 
     addFolder(name: string): QuickFolder {
@@ -263,14 +314,14 @@ export const useQuickRequestStore = defineStore('quickRequest', {
       this.persist()
     },
 
-    /** 删除分类；withRequests 为 false 时把其中的请求退回未分类 */
+    /** 删除分类；withRequests 为 false 时把其中的请求退回一级 */
     removeFolder(id: string, withRequests: boolean) {
       this.folders = this.folders.filter((item) => item.id !== id)
       if (withRequests) {
         const gone = new Set(this.requests.filter((item) => item.folderId === id).map((item) => item.id))
         this.requests = this.requests.filter((item) => item.folderId !== id)
         this.opened = this.opened.filter((item) => !gone.has(item))
-        this.dirty = this.dirty.filter((item) => !gone.has(item))
+        for (const requestId of gone) this.discardDraft(requestId)
         if (gone.has(this.activeId)) this.activeId = this.opened[0] ?? this.requests[0]?.id ?? ''
       } else {
         for (const item of this.requests) {
@@ -305,14 +356,14 @@ export const useQuickRequestStore = defineStore('quickRequest', {
       const tab = this.opened.indexOf(id)
       this.requests.splice(index, 1)
       this.opened = this.opened.filter((item) => item !== id)
-      this.dirty = this.dirty.filter((item) => item !== id)
+      this.discardDraft(id)
       if (this.activeId === id) {
         this.activeId = this.opened[Math.min(tab, this.opened.length - 1)] ?? this.requests[0]?.id ?? ''
       }
       this.persist()
     },
 
-    /** 移动请求到某个分类，folderId 传空串表示未分类 */
+    /** 移动请求到某个分类，folderId 传空串表示移回一级 */
     move(id: string, folderId: string) {
       const request = this.requests.find((item) => item.id === id)
       if (!request) return
@@ -321,11 +372,47 @@ export const useQuickRequestStore = defineStore('quickRequest', {
       this.persist()
     },
 
+    /**
+     * 拖拽排序 / 跨分类移动：把请求放到 folderId 分类中 beforeId 之前。
+     * beforeId 为空表示追加到该分类末尾（未归类的请求即追加到一级列表末尾）。
+     * 树的展示顺序完全由 requests 数组顺序决定，因此这里直接调整数组位置。
+     */
+    moveTo(id: string, folderId: string, beforeId = '') {
+      const from = this.requests.findIndex((item) => item.id === id)
+      if (from < 0) return
+      const [request] = this.requests.splice(from, 1)
+      request.folderId = folderId
+      request.updatedAt = Date.now()
+
+      if (beforeId) {
+        const target = this.requests.findIndex((item) => item.id === beforeId)
+        if (target >= 0) {
+          this.requests.splice(target, 0, request)
+          this.persist()
+          return
+        }
+      }
+
+      // 追加到目标分类最后一个请求之后；分类为空时放到数组末尾
+      let last = -1
+      for (let i = this.requests.length - 1; i >= 0; i--) {
+        if (this.requests[i].folderId === folderId) {
+          last = i
+          break
+        }
+      }
+      this.requests.splice(last >= 0 ? last + 1 : this.requests.length, 0, request)
+      this.persist()
+    },
+
     rename(id: string, name: string) {
       const request = this.requests.find((item) => item.id === id)
       if (!request) return
       request.name = name.trim() || request.name
       request.updatedAt = Date.now()
+      // 编辑器正开着这个请求时，草稿里的名称也同步成新名称
+      const draft = this.drafts[id]
+      if (draft) draft.name = request.name
       this.persist()
     },
 
@@ -335,12 +422,6 @@ export const useQuickRequestStore = defineStore('quickRequest', {
       if (id && !this.opened.includes(id) && this.requests.some((item) => item.id === id)) {
         this.opened.push(id)
       }
-      this.persist()
-    },
-
-    /** 编辑器改动落盘：内容已直接写在 store 对象上，这里只更新时间戳并触发持久化。 */
-    touch(request: QuickRequest) {
-      request.updatedAt = Date.now()
       this.persist()
     },
 

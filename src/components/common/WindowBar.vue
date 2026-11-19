@@ -10,7 +10,7 @@
  * 设置入口直接放在窗口栏上，不使用下拉菜单，也不依赖原生窗口。
  */
 
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useTheme } from '@/composables/useTheme'
@@ -31,15 +31,36 @@ interface NavItem {
   active: (path: string) => boolean
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { path: '/', label: '项目管理', icon: 'Files', active: (path) => path === '/' || path.startsWith('/doc') },
-  { path: '/quick', label: '快捷请求', icon: 'Lightning', active: (path) => path.startsWith('/quick') },
-  { path: '/sync-log', label: '同步日志', icon: 'Clock', active: (path) => path.startsWith('/sync-log') }
-]
-
 const route = useRoute()
 const router = useRouter()
 const { isDark, toggleTheme } = useTheme()
+
+/**
+ * 「项目管理」段内最近停留的地址：项目列表 `/` 或某个文档 `/doc/:id`。
+ *
+ * 从快捷请求 / 同步日志切回「项目管理」时直接回到刚才的文档，避免总是落回列表页；
+ * WindowBar 常驻于所有页面，这份记忆随会话存在，不需要落盘。
+ */
+const lastProjectPath = ref('/')
+
+watch(
+  () => route.path,
+  (path) => {
+    if (path === '/' || path.startsWith('/doc')) lastProjectPath.value = path
+  },
+  { immediate: true }
+)
+
+const navItems = computed<NavItem[]>(() => [
+  {
+    path: lastProjectPath.value,
+    label: '项目管理',
+    icon: 'Files',
+    active: (path) => path === '/' || path.startsWith('/doc')
+  },
+  { path: '/quick', label: '快捷请求', icon: 'Lightning', active: (path) => path.startsWith('/quick') },
+  { path: '/sync-log', label: '同步日志', icon: 'Clock', active: (path) => path.startsWith('/sync-log') }
+])
 
 /** 是否最大化（决定最大化按钮图标） */
 const isMaximized = ref(false)
@@ -96,8 +117,8 @@ onBeforeUnmount(() => {
     <!-- 应用级导航 -->
     <nav class="app-bar__nav">
       <RouterLink
-        v-for="item in NAV_ITEMS"
-        :key="item.path"
+        v-for="item in navItems"
+        :key="item.label"
         :to="item.path"
         class="app-bar__link"
         :class="{ 'is-active': item.active(route.path) }"

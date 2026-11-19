@@ -15,6 +15,15 @@ import { useUpdate } from '@/composables/useUpdate'
 const router = useRouter()
 const { autoCheck } = useUpdate()
 
+/**
+ * 需要保留状态的页面：
+ *  - HomeView（项目列表 / 快捷请求）
+ *  - DocView（接口文档）
+ * 从快捷请求、同步日志或设置页切回时直接复用原实例，不再重新拉取文档、
+ * 也不会丢掉已打开的接口标签与滚动位置。同步日志页不缓存，保证每次进入都是最新数据。
+ */
+const CACHED_VIEWS = ['HomeView', 'DocView']
+
 let unlistenNavigateSettings: (() => void) | null = null
 
 /** 监听托盘菜单「设置」触发的导航事件 */
@@ -41,7 +50,9 @@ onBeforeUnmount(() => {
     <div class="app-shell__content">
       <router-view v-slot="{ Component }">
         <transition name="kd-fade" mode="out-in">
-          <component :is="Component" class="app-shell__page" />
+          <keep-alive :include="CACHED_VIEWS">
+            <component :is="Component" class="app-shell__page" />
+          </keep-alive>
         </transition>
       </router-view>
     </div>

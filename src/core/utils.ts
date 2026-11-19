@@ -140,6 +140,19 @@ export function isAbsoluteUrl(url: string): boolean {
   return /^https?:\/\//i.test(String(url ?? '').trim())
 }
 
+/**
+ * 把标题 / 分组名转成安全的文件名片段。
+ * 替换 Windows / macOS 不允许的字符，压缩空白，并去掉首尾的点（避免生成隐藏文件）。
+ */
+export function safeFileName(text: string, fallback = 'export', max = 80): string {
+  const cleaned = String(text ?? '')
+    .replace(/[\\/:*?"<>|\r\n\t]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s.-]+|[\s.]+$/g, '')
+  if (!cleaned) return fallback
+  return cleaned.length > max ? cleaned.slice(0, max).trim() : cleaned
+}
+
 /** JSON 美化输出，失败时原样返回 */
 export function prettyJson(value: unknown, indent = 2): string {
   if (value === undefined || value === null) return ''

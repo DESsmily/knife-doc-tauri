@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { message } from '@/core/message'
 
 import CodeBlock from '@/components/common/CodeBlock.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import MarkdownText from '@/components/common/MarkdownText.vue'
 import ParamTable from '@/components/doc/ParamTable.vue'
+import { exportJson } from '@/core/http'
+import { isTauri } from '@/core/tauri'
+import { safeFileName } from '@/core/utils'
 import { useDocStore } from '@/stores/doc'
 
 const emit = defineEmits<{
@@ -15,6 +19,36 @@ const docStore = useDocStore()
 
 const keyword = ref('')
 const selectedName = ref('')
+const downloading = ref(false)
+
+/**
+ * 下载全部数据模型：把当前分组的 definitions / components.schemas 原样导出为
+ * 单个 JSON 文件（key 为模型名），保留 $ref 与校验约束，可直接被其它工具消费。
+ */
+async function downloadModels() {
+  const parser = docStore.parser
+  if (!parser) {
+    message.warning('当前分组文档尚未加载完成')
+    return
+  }
+  const definitions = parser.resolver.definitions
+  const count = Object.keys(definitions).length
+  if (count === 0) {
+    message.warning('当前分组没有可导出的数据模型')
+    return
+  }
+  downloading.value = true
+  try {
+    const name = safeFileName(docStore.currentGroup?.name || 'models', 'models')
+    const path = await exportJson(`${name}-models.json`, definitions)
+    if (!path) return
+    message.success(isTauri ? `已导出 ${count} 个模型到 ${path}` : `已导出 ${count} 个模型（${name}-models.json）`)
+  } catch (error) {
+    message.error(`导出失败：${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    downloading.value = false
+  }
+}
 
 const filteredModels = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -47,6 +81,17 @@ watch(
           <el-icon><Search /></el-icon>
         </template>
       </el-input>
+      <el-tooltip content="把全部数据模型导出为一个 JSON 文件" placement="bottom">
+        <el-button
+          size="small"
+          :loading="downloading"
+          :disabled="docStore.models.length === 0"
+          @click="downloadModels"
+        >
+          <el-icon><Download /></el-icon>
+          <span>下载全部</span>
+        </el-button>
+      </el-tooltip>
     </header>
 
     <EmptyState
