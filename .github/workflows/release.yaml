@@ -34,6 +34,11 @@ jobs:
         id: changelog
         run: |
           node scripts/extract-changelog.mjs "${{ github.ref_name }}" > "$RUNNER_TEMP/changelog.md"
+          {
+            echo "body<<EOF"
+            cat "$RUNNER_TEMP/changelog.md"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: tauri-apps/tauri-action@v1
         env:
@@ -43,7 +48,7 @@ jobs:
         with:
           releaseName: "Release ${{ github.ref_name }}"
           tagName: ${{ github.ref_name }}
-          body_path: ${{ runner.temp }}/changelog.md   # 关键：直接指向抽取出的文件路径
+          releaseBody: ${{ steps.changelog.outputs.body }}   # 关键：用 releaseBody 传内容
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
