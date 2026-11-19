@@ -39,6 +39,9 @@ jobs:
             cat "$RUNNER_TEMP/changelog.md"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+      
+      - name: Debug changelog output
+        run: echo "Body is: [${{ steps.changelog.outputs.body }}]"
 
       - uses: tauri-apps/tauri-action@v1
         env:
