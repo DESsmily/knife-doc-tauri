@@ -9,6 +9,7 @@
 import { computed, ref } from 'vue'
 import { message } from '@/core/message'
 
+import BinaryResponse from '@/components/common/BinaryResponse.vue'
 import CodeBlock from '@/components/common/CodeBlock.vue'
 import { copyText, decodeBodyBytes, type DebugRequestOptions, type DebugResponseResult } from '@/core/http'
 import { prettyJson, safeParse, formatBytes, formatDuration } from '@/core/utils'
@@ -37,6 +38,12 @@ const view = ref<ViewName>('pretty')
 const format = ref<FormatName>('auto')
 const encoding = ref('utf-8')
 
+/** 二进制响应的下载入口（头部图标与正文卡片共用） */
+const binaryRef = ref<InstanceType<typeof BinaryResponse> | null>(null)
+
+/** 响应体是文件：不解析、不高亮，只给下载按钮 */
+const isBinary = computed(() => props.response?.binary === true)
+
 const VIEW_MODES: { value: ViewName; label: string }[] = [
   { value: 'pretty', label: 'Pretty' },
   { value: 'raw', label: 'Raw' },
@@ -64,12 +71,15 @@ const contentType = computed(() => props.response?.headers['content-type'] ?? ''
 const bodyText = computed(() => {
   const response = props.response
   if (!response) return ''
+  // 二进制响应从未解码成文本，按编码重算也没有意义
+  if (response.binary) return ''
   if (encoding.value === 'utf-8' || !response.bodyBytes?.length) return response.body
   return decodeBodyBytes(response.bodyBytes, encoding.value)
 })
 
 /** Auto 时先看 Content-Type，再看内容长相 */
 const resolvedFormat = computed<Exclude<FormatName, 'auto'>>(() => {
+  if (isBinary.value) return 'text'
   if (format.value !== 'auto') return format.value
   const type = contentType.value.toLowerCase()
   if (type.includes('json')) return 'json'
@@ -233,6 +243,7 @@ const consoleRows = computed<ConsoleRow[]>(() => {
   push(response.status >= 400 || !response.status ? 'error' : 'info', `${response.status} ${response.statusText}`)
   push('info', `耗时 ${formatDuration(response.duration)}，大小 ${formatBytes(response.size)}`)
   if (contentType.value) push('info', `Content-Type: ${contentType.value}`)
+  if (response.binary) push('warn', '响应体为二进制文件，已跳过文本渲染，可通过「下载文件」保存到本地')
   if (response.finalUrl && props.sent?.url && response.finalUrl !== props.sent.url) {
     push('warn', `最终地址：${response.finalUrl}`)
   }
@@ -299,11 +310,20 @@ const statusClass = computed(() => {
 const sizeLabel = computed(() => formatBytes(props.response?.size ?? 0))
 
 async function copyBody() {
+  if (isBinary.value) {
+    message.warning('二进制响应没有可复制的文本，请直接下载文件')
+    return
+  }
   const ok = await copyText(displayBody.value || bodyText.value)
   message[ok ? 'success' : 'warning'](ok ? '响应内容已复制' : '复制失败')
 }
 
 function saveBody() {
+  // 二进制响应交给下载卡片：走原生保存对话框按字节落盘，不做文本转换
+  if (isBinary.value) {
+    void binaryRef.value?.download()
+    return
+  }
   const text = displayBody.value || bodyText.value
   if (!text) {
     message.warning('还没有可保存的响应')
@@ -340,10 +360,16 @@ function saveBody() {
         <span v-else-if="sending" class="resp-meta">请求发送中…</span>
         <span v-else class="resp-meta">未发送</span>
 
-        <button type="button" class="resp-icon" title="复制响应" :disabled="!response" @click="copyBody">
+        <button
+          type="button"
+          class="resp-icon"
+          :title="isBinary ? '二进制响应不支持复制文本' : '复制响应'"
+          :disabled="!response || isBinary"
+          @click="copyBody"
+        >
           <el-icon><CopyDocument /></el-icon>
         </button>
-        <button type="button" class="resp-icon" title="保存为文件" :disabled="!response" @click="saveBody">
+        <button type="button" class="resp-icon" :title="isBinary ? '下载文件' : '保存为文件'" :disabled="!response" @click="saveBody">
           <el-icon><Download /></el-icon>
         </button>
         <button
@@ -362,7 +388,7 @@ function saveBody() {
     </div>
 
     <template v-else>
-      <div v-if="activeTab === 'body' && response" class="resp-toolbar">
+      <div v-if="activeTab === 'body' && response && !isBinary" class="resp-toolbar">
         <div class="resp-views">
           <button
             v-for="item in VIEW_MODES"
@@ -420,7 +446,15 @@ function saveBody() {
         />
 
         <template v-if="activeTab === 'body'">
-          <div v-if="view === 'pretty'" class="resp-fill">
+          <BinaryResponse
+            v-if="isBinary"
+            ref="binaryRef"
+            :response="response"
+            :download-name="downloadName"
+            class="resp-binary"
+          />
+
+          <div v-else-if="view === 'pretty'" class="resp-fill">
             <CodeBlock
               :code="displayBody"
               :lang="highlightLang"
@@ -759,6 +793,10 @@ function saveBody() {
   margin: 0;
   font-size: $font-sm;
   color: var(--kd-text-3);
+}
+
+.resp-binary {
+  flex: none;
 }
 
 .resp-curl {

@@ -1,6 +1,6 @@
 [package]
 name = "knife-doc"
-version = "0.0.6"
+version = "0.0.7"
 description = "Knife4j 风格的接口文档与快捷请求桌面客户端"
 authors = ["knife-doc"]
 edition = "2021"

@@ -146,14 +146,22 @@ export interface DebugResponseResult {
   statusText: string
   /** 毫秒 */
   duration: number
-  /** 响应体文本（按 Content-Type 的 charset 解码） */
+  /** 响应体文本（按 Content-Type 的 charset 解码）；二进制响应为空串 */
   body: string
-  /** 响应体原始字节，供界面按其它编码重新解码 */
+  /** 响应体原始字节，供界面按其它编码重新解码或落盘 */
   bodyBytes: Uint8Array
   /** 响应头 */
   headers: Record<string, string>
   /** 响应大小（字节） */
   size: number
+  /**
+   * 是否为二进制响应（图片 / 压缩包 / 音视频 / Office 等）。
+   * 这类响应不做文本解码与渲染，界面上只提供「下载文件」入口，
+   * 否则几十 MB 的字节流被当成文本高亮会把界面卡死。
+   */
+  binary: boolean
+  /** 二进制响应推断出的文件名（Content-Disposition → URL → 调用方兜底） */
+  fileName: string
   /** 错误信息 */
   error?: string
   /** 最终请求的地址 */
@@ -178,6 +186,146 @@ export function decodeBodyBytes(bytes: Uint8Array, encoding = 'utf-8'): string {
   } catch {
     return new TextDecoder('utf-8').decode(bytes)
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* 二进制响应识别与文件名推断                                          */
+/* ------------------------------------------------------------------ */
+
+/** 常见二进制类型 → 扩展名（其它类型按 Content-Type 的 subtype 猜） */
+const MIME_EXTENSIONS: Record<string, string> = {
+  'application/octet-stream': 'bin',
+  'application/pdf': 'pdf',
+  'application/zip': 'zip',
+  'application/gzip': 'gz',
+  'application/x-gzip': 'gz',
+  'application/x-tar': 'tar',
+  'application/x-7z-compressed': '7z',
+  'application/vnd.rar': 'rar',
+  'application/x-rar-compressed': 'rar',
+  'application/msword': 'doc',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.ms-powerpoint': 'ppt',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/bmp': 'bmp',
+  'image/svg+xml': 'svg',
+  'image/x-icon': 'ico',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm'
+}
+
+/** 明确是文本的 Content-Type（含 JSON / XML 的各种 +json、+xml 变体） */
+function isTextualMime(mime: string): boolean {
+  if (!mime) return true
+  if (mime.startsWith('text/')) return true
+  if (mime.includes('json') || mime.includes('xml')) return true
+  if (mime.includes('javascript') || mime.includes('ecmascript')) return true
+  if (mime.includes('x-www-form-urlencoded')) return true
+  if (mime.includes('graphql') || mime.includes('ndjson')) return true
+  return ['application/yaml', 'application/x-yaml', 'application/toml', 'application/sql'].includes(mime)
+}
+
+/**
+ * 字节嗅探：出现 NUL 或过多 C0 控制符即认为不是文本。
+ * 用于兜住后端把二进制当成 text/plain 返回的情况。
+ */
+function looksBinary(bytes: Uint8Array): boolean {
+  const limit = Math.min(bytes.length, 4096)
+  if (!limit) return false
+  let control = 0
+  for (let index = 0; index < limit; index++) {
+    const byte = bytes[index]
+    if (byte === 0) return true
+    // 放行 \t \n \v \f \r，其余 C0 控制符都算二进制特征
+    if (byte < 0x09 || (byte > 0x0d && byte < 0x20)) control++
+  }
+  return control / limit > 0.1
+}
+
+/** 响应体是否应按「文件」处理：不做文本解码、不渲染，只给下载入口 */
+export function isBinaryPayload(bytes: Uint8Array, contentType: string): boolean {
+  if (!bytes.length) return false
+  // 字节特征优先：即使后端标成 text/plain，实际是二进制也不渲染
+  if (looksBinary(bytes)) return true
+  const mime = contentType.split(';')[0].trim().toLowerCase()
+  if (isTextualMime(mime)) return false
+  // 其余 application/* 一律按文件处理（octet-stream、pdf、office、protobuf ...）
+  return true
+}
+
+/** 从 Content-Disposition 取文件名，兼容 RFC 5987 的 filename*=UTF-8''xxx */
+function fileNameFromDisposition(disposition: string): string {
+  if (!disposition) return ''
+  const extended = /filename\*\s*=\s*([^;]+)/i.exec(disposition)
+  if (extended) {
+    const raw = extended[1].trim().replace(/^["']|["']$/g, '')
+    const parts = raw.split("''")
+    const encoded = parts.length > 1 ? parts.slice(1).join("''") : raw
+    try {
+      return decodeURIComponent(encoded)
+    } catch {
+      return encoded
+    }
+  }
+  const plain = /filename\s*=\s*("[^"]*"|[^;]+)/i.exec(disposition)
+  if (!plain) return ''
+  const raw = plain[1].trim().replace(/^"|"$/g, '')
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
+/** URL 末段作为文件名候选 */
+function fileNameFromUrl(url: string): string {
+  try {
+    const segment = new URL(url).pathname.split('/').filter(Boolean).pop() ?? ''
+    return decodeURIComponent(segment)
+  } catch {
+    return ''
+  }
+}
+
+function extensionFromMime(mime: string): string {
+  const type = mime.split(';')[0].trim().toLowerCase()
+  if (MIME_EXTENSIONS[type]) return MIME_EXTENSIONS[type]
+  const subtype = type.split('/')[1] ?? ''
+  const cleaned = subtype.replace(/^x-/, '').replace(/^vnd\./, '')
+  if (/^[a-z0-9]{1,8}$/.test(cleaned)) return cleaned
+  return 'bin'
+}
+
+/** 去掉文件名里不能落盘的字符 */
+function sanitizeFileName(name: string, fallback: string): string {
+  const cleaned = name.replace(/[\\/:*?"<>|\r\n\t]/g, '_').trim().slice(0, 120)
+  return cleaned || fallback
+}
+
+/**
+ * 二进制响应的建议文件名：优先发送时推断的名字（Content-Disposition / URL 末段），
+ * 其次再现场推一次，最后回落到调用方给的名字；没有扩展名时按 Content-Type 补一个。
+ */
+export function binaryFileName(
+  response: Pick<DebugResponseResult, 'headers' | 'fileName' | 'finalUrl' | 'binary'>,
+  fallback = 'download'
+): string {
+  const contentType = response.headers['content-type'] ?? ''
+  const candidate =
+    response.fileName ||
+    fileNameFromDisposition(response.headers['content-disposition'] ?? '') ||
+    fileNameFromUrl(response.finalUrl) ||
+    fallback
+  const name = sanitizeFileName(candidate, fallback)
+  return /\.[a-z0-9]{1,8}$/i.test(name) ? name : `${name}.${extensionFromMime(contentType)}`
 }
 
 function buildCurl(options: DebugRequestOptions, finalUrl: string): string {
@@ -250,15 +398,25 @@ export async function sendDebugRequest(options: DebugRequestOptions): Promise<De
         ? new Uint8Array(response.data)
         : new TextEncoder().encode(String(response.data ?? ''))
 
+    const contentTypeHeader = responseHeaders['content-type'] ?? ''
+    const binary = isBinaryPayload(bodyBytes, contentTypeHeader)
+
     return {
       ok: response.status >= 200 && response.status < 400,
       status: response.status,
       statusText: response.statusText,
       duration,
-      body: decodeBodyBytes(bodyBytes, charsetOf(responseHeaders)),
+      // 二进制响应不解码：几十 MB 的字节流转成字符串既没意义，还会拖死界面
+      body: binary ? '' : decodeBodyBytes(bodyBytes, charsetOf(responseHeaders)),
       bodyBytes,
       headers: responseHeaders,
       size: bodyBytes.byteLength,
+      binary,
+      fileName: binary
+        ? fileNameFromDisposition(responseHeaders['content-disposition'] ?? '') ||
+          fileNameFromUrl(finalUrl) ||
+          'download'
+        : '',
       finalUrl,
       curl
     }
@@ -273,6 +431,8 @@ export async function sendDebugRequest(options: DebugRequestOptions): Promise<De
       bodyBytes: new Uint8Array(0),
       headers: {},
       size: 0,
+      binary: false,
+      fileName: '',
       error: describeError(error),
       finalUrl,
       curl
@@ -281,9 +441,9 @@ export async function sendDebugRequest(options: DebugRequestOptions): Promise<De
 }
 
 /** 根据文件名取扩展名，用于保存对话框的过滤器 */
-function extensionOf(filename: string): string {
+function extensionOf(filename: string, fallback = 'txt'): string {
   const index = filename.lastIndexOf('.')
-  return index > 0 ? filename.slice(index + 1) : 'txt'
+  return index > 0 ? filename.slice(index + 1) : fallback
 }
 
 /**
@@ -303,6 +463,60 @@ export async function saveTextFile(filename: string, content: string, mime = 'ap
   }
 
   const blob = new Blob([content], { type: `${mime};charset=utf-8` })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+  return filename
+}
+
+/** 分块大小：base64 后约 4MB，单次 IPC 数据量可控 */
+const BINARY_CHUNK_SIZE = 3 * 1024 * 1024
+
+/** Uint8Array → base64（分段拼接，避免一次展开参数过多导致栈溢出） */
+function bytesToBase64(bytes: Uint8Array): string {
+  const step = 0x2000
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += step) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + step))
+  }
+  return btoa(binary)
+}
+
+/**
+ * 保存二进制响应：桌面客户端弹原生「另存为」对话框，按块写入磁盘（取消返回 null）；
+ * 浏览器环境退回 Blob 下载。
+ */
+export async function saveBinaryFile(filename: string, bytes: Uint8Array): Promise<string | null> {
+  if (isTauri) {
+    const target = await save({
+      defaultPath: filename,
+      title: '保存文件',
+      filters: [{ name: '全部文件', extensions: [extensionOf(filename, 'bin')] }]
+    })
+    if (!target) return null
+
+    if (!bytes.length) {
+      await call('write_binary_chunk', { path: target, data: '', append: false })
+      return target
+    }
+    for (let offset = 0; offset < bytes.length; offset += BINARY_CHUNK_SIZE) {
+      const chunk = bytes.subarray(offset, Math.min(offset + BINARY_CHUNK_SIZE, bytes.length))
+      await call('write_binary_chunk', {
+        path: target,
+        data: bytesToBase64(chunk),
+        append: offset > 0
+      })
+    }
+    return target
+  }
+
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  const blob = new Blob([buffer], { type: 'application/octet-stream' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url

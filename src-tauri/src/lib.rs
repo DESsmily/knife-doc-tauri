@@ -79,6 +79,7 @@ pub fn run() {
             commands::write_cache_text,
             commands::read_cache_text,
             commands::write_temp_text,
+            commands::write_binary_chunk,
             commands::data_usage,
             commands::clear_dir,
             commands::open_dir

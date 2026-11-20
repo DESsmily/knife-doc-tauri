@@ -2,6 +2,7 @@
 import { computed, reactive, ref, shallowReactive, watch } from 'vue'
 import { message } from '@/core/message'
 
+import BinaryResponse from '@/components/common/BinaryResponse.vue'
 import CodeBlock from '@/components/common/CodeBlock.vue'
 import TypeBadge from '@/components/common/TypeBadge.vue'
 import { headerSuggestions } from '@/core/headers'
@@ -433,7 +434,14 @@ const response = ref<DebugResponseResult | null>(null)
 const responseTab = ref('body')
 const jsonPath = ref('')
 
+/** 二进制响应的下载入口（头部图标与正文卡片共用） */
+const binaryRef = ref<InstanceType<typeof BinaryResponse> | null>(null)
+
+/** 响应体是文件：不解码、不高亮，只给下载按钮 */
+const isBinaryResponse = computed(() => response.value?.binary === true)
+
 const prettyBody = computed(() => {
+  if (isBinaryResponse.value) return ''
   const raw = response.value?.body ?? ''
   if (!raw.trim()) return ''
   const parsed = safeParse(raw)
@@ -447,7 +455,9 @@ const contentType = computed(() => {
   return key ? headers[key] : ''
 })
 
-const isJsonResponse = computed(() => contentType.value.includes('json') || safeParse(response.value?.body ?? '') !== null)
+const isJsonResponse = computed(
+  () => !isBinaryResponse.value && (contentType.value.includes('json') || safeParse(response.value?.body ?? '') !== null)
+)
 
 const responseTabs = computed(() => {
   const list = [{ name: 'body', label: '响应体' }, { name: 'headers', label: '响应头' }]
@@ -539,11 +549,20 @@ function handleReset() {
 }
 
 async function handleCopyResponse() {
+  if (isBinaryResponse.value) {
+    message.warning('二进制响应没有可复制的文本，请直接下载文件')
+    return
+  }
   const ok = await copyText(response.value?.body ?? '')
   message[ok ? 'success' : 'warning'](ok ? '响应内容已复制' : '复制失败')
 }
 
 function handleDownload() {
+  // 二进制响应走字节落盘，避免先把文件内容转成字符串
+  if (isBinaryResponse.value) {
+    void binaryRef.value?.download()
+    return
+  }
   const ext = isJsonResponse.value ? 'json' : 'txt'
   void saveTextFile(`${props.detail.operationId || 'response'}.${ext}`, response.value?.body ?? '').then((path) => {
     if (path) message.success(`已保存到 ${path}`)
@@ -1143,12 +1162,12 @@ watch(jsonPath, (path) => {
             {{ (response.size / 1024).toFixed(2) }} KB
           </span>
           <div class="resp-head__actions">
-            <el-tooltip content="复制响应内容" placement="top">
-              <el-button link size="small" @click="handleCopyResponse">
+            <el-tooltip :content="isBinaryResponse ? '二进制响应不支持复制文本' : '复制响应内容'" placement="top">
+              <el-button link size="small" :disabled="isBinaryResponse" @click="handleCopyResponse">
                 <el-icon><CopyDocument /></el-icon>
               </el-button>
             </el-tooltip>
-            <el-tooltip content="下载响应内容" placement="top">
+            <el-tooltip :content="isBinaryResponse ? '下载文件' : '下载响应内容'" placement="top">
               <el-button link size="small" @click="handleDownload">
                 <el-icon><Download /></el-icon>
               </el-button>
@@ -1171,7 +1190,13 @@ watch(jsonPath, (path) => {
 
           <div class="resp-body">
             <template v-if="responseTab === 'body'">
-              <CodeBlock :code="prettyBody || response.body" lang="json" max-height="none" />
+              <BinaryResponse
+                v-if="isBinaryResponse"
+                ref="binaryRef"
+                :response="response"
+                :download-name="detail.operationId || 'response'"
+              />
+              <CodeBlock v-else :code="prettyBody || response.body" lang="json" max-height="none" />
             </template>
 
             <template v-else-if="responseTab === 'headers'">
